@@ -63,11 +63,10 @@ impl AfkConfig {
     pub fn remove_afk(&mut self, user_id: u64) -> Option<AfkStatus> {
         let status = self.users.remove(&user_id.to_string());
         // Also remove username mapping
-        if let Some(ref s) = status {
-            if let Some(ref uname) = s.username {
+        if let Some(ref s) = status
+            && let Some(ref uname) = s.username {
                 self.username_to_id.remove(&uname.to_lowercase());
             }
-        }
         status
     }
 
@@ -84,11 +83,10 @@ impl AfkConfig {
     /// Get AFK status by username (without @, case-insensitive).
     pub fn get_afk_by_username(&self, username: &str) -> Option<(u64, &AfkStatus)> {
         let normalized = username.to_lowercase();
-        if let Some(&user_id) = self.username_to_id.get(&normalized) {
-            if let Some(status) = self.users.get(&user_id.to_string()) {
+        if let Some(&user_id) = self.username_to_id.get(&normalized)
+            && let Some(status) = self.users.get(&user_id.to_string()) {
                 return Some((user_id, status));
             }
-        }
         None
     }
 }

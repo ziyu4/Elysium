@@ -280,8 +280,8 @@ async fn get_target_user(
     _bot: &ThrottledBot,
 ) -> anyhow::Result<Option<(u64, String, String)>> {
     // Check reply first
-    if let Some(reply) = msg.reply_to_message() {
-        if let Some(user) = reply.from.as_ref() {
+    if let Some(reply) = msg.reply_to_message()
+        && let Some(user) = reply.from.as_ref() {
             let mention = format!(
                 "<a href=\"tg://user?id={}\">{}</a>",
                 user.id,
@@ -289,7 +289,6 @@ async fn get_target_user(
             );
             return Ok(Some((user.id.0, mention, user.first_name.clone())));
         }
-    }
 
     // Check text args for user ID
     if let Some(text) = msg.text() {

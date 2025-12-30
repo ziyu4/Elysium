@@ -89,14 +89,13 @@ pub async fn filter_command(
     let mut final_reply = reply.clone();
     
     // If no reply text but replying to message, use that message's text
-    if final_reply.is_empty() {
-        if let Some(reply_msg) = msg.reply_to_message() {
+    if final_reply.is_empty()
+        && let Some(reply_msg) = msg.reply_to_message() {
             final_reply = reply_msg.text()
                 .or_else(|| reply_msg.caption())
                 .map(String::from)
                 .unwrap_or_default();
         }
-    }
 
     if final_reply.is_empty() && media_file_id.is_none() {
         bot.send_message(chat_id, "❌ Reply tidak boleh kosong. Berikan teks reply atau reply ke media.")
@@ -300,13 +299,12 @@ fn parse_filter_args(args: &str) -> (String, String) {
     let args = args.trim();
     
     // Check for quoted trigger: /filter "multi word" reply
-    if args.starts_with('"') {
-        if let Some(end_quote) = args[1..].find('"') {
+    if args.starts_with('"')
+        && let Some(end_quote) = args[1..].find('"') {
             let trigger = args[1..end_quote + 1].to_string();
             let reply = args[end_quote + 2..].trim().to_string();
             return (trigger, reply);
         }
-    }
     
     // Simple: /filter trigger reply
     let parts: Vec<&str> = args.splitn(2, char::is_whitespace).collect();

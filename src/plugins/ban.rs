@@ -147,8 +147,8 @@ async fn ban_action(
     };
 
     // Anti-Admin Check (except for Unban)
-    if mode != BanMode::Unban {
-        if state.permissions.is_admin(chat_id, target_id).await.unwrap_or(false) {
+    if mode != BanMode::Unban
+        && state.permissions.is_admin(chat_id, target_id).await.unwrap_or(false) {
             let action_text = match mode {
                 BanMode::Forever | BanMode::Temporary | BanMode::DeleteAndBan | BanMode::SilentBan => {
                     "membanned"
@@ -164,7 +164,6 @@ async fn ban_action(
                 .await?;
             return Ok(());
         }
-    }
 
     // Handle Time for Tban
     let (duration, reason_idx) = if mode == BanMode::Temporary {

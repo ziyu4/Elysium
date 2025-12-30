@@ -8,16 +8,13 @@ use std::env;
 /// Bot running mode
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum BotMode {
+    #[default]
     Polling,
     Webhook,
 }
 
-impl Default for BotMode {
-    fn default() -> Self {
-        Self::Polling
-    }
-}
 
 /// Application configuration
 #[derive(Debug, Clone)]

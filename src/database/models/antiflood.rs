@@ -5,10 +5,12 @@ use serde::{Deserialize, Serialize};
 /// Penalty type for antiflood violations.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum FloodPenalty {
     /// Warn the user (no action, just message)
     Warn,
     /// Mute the user for a duration
+    #[default]
     Mute,
     /// Kick the user (can rejoin)
     Kick,
@@ -18,11 +20,6 @@ pub enum FloodPenalty {
     Ban,
 }
 
-impl Default for FloodPenalty {
-    fn default() -> Self {
-        Self::Mute
-    }
-}
 
 /// Antiflood configuration for a group.
 #[derive(Debug, Clone, Serialize, Deserialize)]

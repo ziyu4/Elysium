@@ -53,18 +53,16 @@ async fn unified_message_handler(
            msg.chat.id, text.chars().take(30).collect::<String>(), is_command);
 
     // Run antiflood (for non-commands)
-    if !is_command {
-        if let Err(e) = antiflood::check_antiflood(&bot, &msg, &state, &flood_tracker).await {
+    if !is_command
+        && let Err(e) = antiflood::check_antiflood(&bot, &msg, &state, &flood_tracker).await {
             error!("Antiflood error: {}", e);
         }
-    }
 
     // Run filters (for non-commands)
-    if !is_command && !text.is_empty() {
-        if let Err(e) = filters::check_filters(&bot, &msg, &state).await {
+    if !is_command && !text.is_empty()
+        && let Err(e) = filters::check_filters(&bot, &msg, &state).await {
             error!("Filters error: {}", e);
         }
-    }
 
     // Run AFK handler (for all messages - welcome back + reply detection)
     if let Err(e) = afk::afk_handler(bot.clone(), msg.clone(), state.clone()).await {

@@ -67,11 +67,11 @@ impl FloodTracker {
         let now = Instant::now();
         let window = Duration::from_secs(window_secs as u64);
 
-        let mut chat_state = self.data.entry(chat_id).or_insert_with(ChatFloodState::default);
+        let mut chat_state = self.data.entry(chat_id).or_default();
 
         // If a different user spoke, reset all other users' counters (conversation interrupt)
-        if let Some(last_user) = chat_state.last_user_id {
-            if last_user != user_id {
+        if let Some(last_user) = chat_state.last_user_id
+            && last_user != user_id {
                 // Different user spoke - reset counters for all users except current
                 for (uid, user_data) in chat_state.users.iter_mut() {
                     if *uid != user_id {
@@ -80,7 +80,6 @@ impl FloodTracker {
                     }
                 }
             }
-        }
 
         // Update last user
         chat_state.last_user_id = Some(user_id);
@@ -126,11 +125,10 @@ fn is_group_message(msg: Message) -> bool {
     }
 
     // Skip commands
-    if let Some(text) = msg.text() {
-        if text.starts_with('/') {
+    if let Some(text) = msg.text()
+        && text.starts_with('/') {
             return false;
         }
-    }
 
     // Skip messages without sender
     if msg.from.is_none() {

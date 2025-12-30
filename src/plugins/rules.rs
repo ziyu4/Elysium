@@ -291,11 +291,10 @@ pub async fn handle_rules_deeplink(
 /// Get rules text from message (reply or args).
 fn get_rules_text(msg: &Message) -> Option<String> {
     // Check if replying to a message
-    if let Some(reply) = msg.reply_to_message() {
-        if let Some(text) = reply.text().or_else(|| reply.caption()) {
+    if let Some(reply) = msg.reply_to_message()
+        && let Some(text) = reply.text().or_else(|| reply.caption()) {
             return Some(text.to_string());
         }
-    }
 
     // Check command args
     let text = msg.text()?;

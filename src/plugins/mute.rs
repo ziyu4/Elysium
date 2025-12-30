@@ -98,8 +98,8 @@ async fn mute_action(
     };
 
     // Anti-Admin
-    if mode != MuteMode::Unmute {
-        if state.permissions.is_admin(chat_id, target_id).await.unwrap_or(false) {
+    if mode != MuteMode::Unmute
+        && state.permissions.is_admin(chat_id, target_id).await.unwrap_or(false) {
             bot.send_message(
                 chat_id,
                 "😏 Kenapa saya harus membisukan seorang admin? Sepertinya itu bukan ide yang bagus."
@@ -108,7 +108,6 @@ async fn mute_action(
                 .await?;
             return Ok(());
         }
-    }
 
     // For silent modes, delete command message first
     if mode == MuteMode::SilentMute {
@@ -160,11 +159,10 @@ async fn mute_action(
             };
 
             // Delete replied message for DeleteMute
-            if mode == MuteMode::DeleteMute {
-                if let Some(reply) = msg.reply_to_message() {
+            if mode == MuteMode::DeleteMute
+                && let Some(reply) = msg.reply_to_message() {
                     let _ = bot.delete_message(chat_id, reply.id).await;
                 }
-            }
 
             // Mute permissions
             let permissions = ChatPermissions::empty(); // No rights = Muted

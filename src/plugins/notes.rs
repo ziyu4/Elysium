@@ -385,13 +385,12 @@ async fn send_note(
     };
 
     // Check admin-only
-    if note.tags.admin_only {
-        if !state.permissions.is_admin(chat_id, user.id).await.unwrap_or(false) {
+    if note.tags.admin_only
+        && !state.permissions.is_admin(chat_id, user.id).await.unwrap_or(false) {
             bot.send_message(chat_id, "❌ Note ini hanya untuk admin.")
                 .await?;
             return Ok(());
         }
-    }
 
     // Determine where to send
     let send_to_pm = if note.tags.is_private {

@@ -97,11 +97,10 @@ async fn warn_action(
     };
 
     // Delete messages based on action
-    if action == WarnAction::DeleteMsg {
-        if let Some(reply) = msg.reply_to_message() {
+    if action == WarnAction::DeleteMsg
+        && let Some(reply) = msg.reply_to_message() {
             let _ = bot.delete_message(chat_id, reply.id).await;
         }
-    }
     if action == WarnAction::Silent {
         let _ = bot.delete_message(chat_id, msg.id).await;
     }
@@ -601,7 +600,7 @@ pub async fn warnlimit_command(bot: ThrottledBot, msg: Message, state: AppState)
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
     } else if let Ok(limit) = args[0].parse::<u32>() {
-        if limit < 1 || limit > 100 {
+        if !(1..=100).contains(&limit) {
             bot.send_message(chat_id, "❌ Batas harus antara 1-100.")
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
@@ -798,11 +797,10 @@ async fn get_target_from_msg(
     state: &AppState,
 ) -> Option<(UserId, String, usize)> {
     // 1. Check reply
-    if let Some(reply) = msg.reply_to_message() {
-        if let Some(user) = &reply.from {
+    if let Some(reply) = msg.reply_to_message()
+        && let Some(user) = &reply.from {
             return Some((user.id, user.first_name.clone(), 0));
         }
-    }
 
     if let Some(text) = msg.text() {
         let parts: Vec<&str> = text.split_whitespace().collect();
@@ -823,11 +821,10 @@ async fn get_target_from_msg(
             // 3. Try TextMention
             if let Some(entities) = msg.entities() {
                 for entity in entities {
-                    if let MessageEntityKind::TextMention { user } = &entity.kind {
-                        if entity.offset < 20 {
+                    if let MessageEntityKind::TextMention { user } = &entity.kind
+                        && entity.offset < 20 {
                             return Some((user.id, user.first_name.clone(), 1));
                         }
-                    }
                 }
             }
 
@@ -838,12 +835,11 @@ async fn get_target_from_msg(
                     return Some((UserId(user.user_id), user.first_name, 1));
                 }
                 // Fallback to get_chat (for bots/channels)
-                if let Ok(chat) = bot.get_chat(arg.to_string()).await {
-                    if chat.is_private() {
+                if let Ok(chat) = bot.get_chat(arg.to_string()).await
+                    && chat.is_private() {
                         let name = chat.first_name().unwrap_or("User").to_string();
                         return Some((UserId(chat.id.0 as u64), name, 1));
                     }
-                }
             }
         }
     }

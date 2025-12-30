@@ -336,8 +336,8 @@ fn parse_buttons(input: &str) -> Vec<Vec<InlineButton>> {
     while i < chars.len() {
         if chars[i] == '{' && i + 7 < chars.len() {
             let prefix: String = chars[i..i + 8].iter().collect();
-            if prefix.to_lowercase() == "{button:" {
-                if let Some((btn, end_idx)) = try_parse_button(&chars, i) {
+            if prefix.to_lowercase() == "{button:"
+                && let Some((btn, end_idx)) = try_parse_button(&chars, i) {
                     current_row.push(btn);
                     i = end_idx;
                     
@@ -352,7 +352,6 @@ fn parse_buttons(input: &str) -> Vec<Vec<InlineButton>> {
                         continue;
                     }
                 }
-            }
         }
         i += 1;
     }
@@ -444,7 +443,7 @@ async fn send_bye_preview(
     let formatted = format_bye_text(
         config.message.as_deref().unwrap_or("Selamat tinggal!"),
         user,
-        &msg.chat.title().unwrap_or("Grup"),
+        msg.chat.title().unwrap_or("Grup"),
     );
 
     let keyboard = build_bye_keyboard(&config.buttons);

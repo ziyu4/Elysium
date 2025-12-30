@@ -68,21 +68,19 @@ impl GroupSettingsRepo {
     /// Get group settings by chat ID (returning Option).
     pub async fn get(&self, chat_id: i64) -> Result<Option<GroupSettings>> {
         // Check cache first
-        if let Some(cache) = &self.cache {
-            if let Some(settings) = cache.get(&chat_id) {
+        if let Some(cache) = &self.cache
+            && let Some(settings) = cache.get(&chat_id) {
                 return Ok(Some(settings));
             }
-        }
 
         // Fetch from DB
         let settings = self.get_from_db(chat_id).await?;
 
         // Update cache
-        if let Some(s) = &settings {
-            if let Some(cache) = &self.cache {
+        if let Some(s) = &settings
+            && let Some(cache) = &self.cache {
                 cache.insert(chat_id, s.clone());
             }
-        }
 
         Ok(settings)
     }

@@ -159,7 +159,7 @@ pub async fn setflood_command(
     }
 
     let max_messages: u32 = match args[0].parse() {
-        Ok(n) if n >= 2 && n <= 100 => n,
+        Ok(n) if (2..=100).contains(&n) => n,
         _ => {
             bot.send_message(chat_id, "❌ Jumlah pesan harus antara 2-100.")
                 .reply_parameters(ReplyParameters::new(msg.id))
@@ -169,7 +169,7 @@ pub async fn setflood_command(
     };
 
     let time_window: u32 = match args[1].parse() {
-        Ok(n) if n >= 1 && n <= 300 => n,
+        Ok(n) if (1..=300).contains(&n) => n,
         _ => {
             bot.send_message(chat_id, "❌ Waktu harus antara 1-300 detik.")
                 .reply_parameters(ReplyParameters::new(msg.id))

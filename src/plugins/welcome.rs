@@ -465,7 +465,7 @@ async fn send_welcome_preview(
     let formatted = format_welcome_text(
         config.message.as_deref().unwrap_or("Selamat datang!"),
         user,
-        &msg.chat.title().unwrap_or("Grup"),
+        msg.chat.title().unwrap_or("Grup"),
         0, // member count placeholder
     );
 

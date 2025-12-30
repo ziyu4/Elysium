@@ -269,7 +269,9 @@ pub enum Command {
 pub fn command_handler() -> UpdateHandler<anyhow::Error> {
     use dptree::case;
 
-    let command_handler = teloxide::filter_command::<Command, _>()
+    
+
+    teloxide::filter_command::<Command, _>()
         .branch(case![Command::Start(args)].endpoint(handle_start))
         .branch(case![Command::Help].endpoint(handle_help))
         // Antiflood
@@ -356,9 +358,7 @@ pub fn command_handler() -> UpdateHandler<anyhow::Error> {
         .branch(case![Command::Warnings].endpoint(warn::warnings_command))
         .branch(case![Command::Warnmode].endpoint(warn::warnmode_command))
         .branch(case![Command::Warnlimit].endpoint(warn::warnlimit_command))
-        .branch(case![Command::Warntime].endpoint(warn::warntime_command));
-
-    command_handler
+        .branch(case![Command::Warntime].endpoint(warn::warntime_command))
 }
 
 /// Build hashtag handler for notes.

@@ -99,8 +99,8 @@ pub async fn afk_handler(
     let mut settings = repo.get_or_create(chat_id.0).await?;
 
     // Check if current user is AFK - if so, welcome them back
-    if settings.afk.is_afk(user_id) {
-        if let Some(afk_status) = settings.afk.remove_afk(user_id) {
+    if settings.afk.is_afk(user_id)
+        && let Some(afk_status) = settings.afk.remove_afk(user_id) {
             repo.save(&settings).await?;
 
             let duration = format_duration_full(afk_status.duration_secs());
@@ -125,23 +125,20 @@ pub async fn afk_handler(
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         }
-    }
 
     // Track which user IDs we've already notified about (to avoid duplicates)
     let mut notified_users: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
     // Check if replying to an AFK user
-    if let Some(reply) = msg.reply_to_message() {
-        if let Some(reply_user) = &reply.from {
+    if let Some(reply) = msg.reply_to_message()
+        && let Some(reply_user) = &reply.from {
             let reply_user_id = reply_user.id.0;
-            if let Some(afk_status) = settings.afk.get_afk(reply_user_id) {
-                if !notified_users.contains(&reply_user_id) {
+            if let Some(afk_status) = settings.afk.get_afk(reply_user_id)
+                && !notified_users.contains(&reply_user_id) {
                     send_afk_notification(&bot, chat_id, msg.id, reply_user_id, afk_status).await?;
                     notified_users.insert(reply_user_id);
                 }
-            }
         }
-    }
 
     // Check mentions in message text
     let msg_text = msg.text().unwrap_or("");
@@ -152,12 +149,11 @@ pub async fn afk_handler(
                 // TextMention - when user is mentioned by clicking their name
                 MessageEntityKind::TextMention { user: mentioned_user } => {
                     let mentioned_user_id = mentioned_user.id.0;
-                    if let Some(afk_status) = settings.afk.get_afk(mentioned_user_id) {
-                        if !notified_users.contains(&mentioned_user_id) {
+                    if let Some(afk_status) = settings.afk.get_afk(mentioned_user_id)
+                        && !notified_users.contains(&mentioned_user_id) {
                             send_afk_notification(&bot, chat_id, msg.id, mentioned_user_id, afk_status).await?;
                             notified_users.insert(mentioned_user_id);
                         }
-                    }
                 },
                 // Mention - @username style mention
                 MessageEntityKind::Mention => {
@@ -169,12 +165,11 @@ pub async fn afk_handler(
                         let username = mention_text.trim_start_matches('@');
                         
                         // Look up if this username belongs to an AFK user
-                        if let Some((afk_user_id, afk_status)) = settings.afk.get_afk_by_username(username) {
-                            if !notified_users.contains(&afk_user_id) {
+                        if let Some((afk_user_id, afk_status)) = settings.afk.get_afk_by_username(username)
+                            && !notified_users.contains(&afk_user_id) {
                                 send_afk_notification(&bot, chat_id, msg.id, afk_user_id, afk_status).await?;
                                 notified_users.insert(afk_user_id);
                             }
-                        }
                     }
                 },
                 _ => {}

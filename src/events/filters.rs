@@ -97,7 +97,7 @@ async fn filter_check_impl(
         };
 
         // Send filter response
-        send_filter_response(&bot, &state, chat_id, user, filter, reply_to).await?;
+        send_filter_response(bot, state, chat_id, user, filter, reply_to).await?;
 
         // Only respond to first matching filter
         break;
