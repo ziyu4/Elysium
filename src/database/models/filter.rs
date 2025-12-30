@@ -114,7 +114,7 @@ impl FiltersConfig {
     }
 
     /// Get a filter by trigger.
-    pub fn get_filter(&self, trigger: &str) -> Option<&Filter> {
+    pub fn _get_filter(&self, trigger: &str) -> Option<&Filter> {
         let trigger_lower = trigger.to_lowercase();
         self.filters.iter().find(|f| f.trigger.to_lowercase() == trigger_lower)
     }

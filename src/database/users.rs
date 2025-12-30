@@ -154,7 +154,7 @@ impl UserRepo {
     }
 
     /// Resolve username to UserId (convenience method).
-    pub async fn resolve_username(&self, username: &str) -> Option<u64> {
+    pub async fn _resolve_username(&self, username: &str) -> Option<u64> {
         let username_clean = username.trim_start_matches('@');
         match self.get_by_username(username_clean).await {
             Ok(Some(user)) => Some(user.user_id),

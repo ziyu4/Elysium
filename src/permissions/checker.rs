@@ -273,7 +273,7 @@ impl Permissions {
     /// Invalidate all cached admin info for a chat.
     ///
     /// Note: This is expensive, use sparingly.
-    pub fn invalidate_chat(&self, _chat_id: ChatId) {
+    pub fn _invalidate_chat(&self, _chat_id: ChatId) {
         // Note: Moka doesn't support prefix invalidation easily
         // For now, we rely on TTL. In production, you might want
         // to track keys per chat for targeted invalidation.

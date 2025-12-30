@@ -146,7 +146,7 @@ impl GroupSettingsRepo {
     }
 
     /// Delete group settings.
-    pub async fn delete(&self, chat_id: i64) -> Result<bool> {
+    pub async fn _delete(&self, chat_id: i64) -> Result<bool> {
         let filter = doc! { "chat_id": chat_id };
         let result = self.collection.delete_one(filter).await?;
         

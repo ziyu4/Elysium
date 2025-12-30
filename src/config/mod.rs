@@ -26,6 +26,8 @@ pub struct Config {
     pub bot_token: String,
     pub bot_mode: BotMode,
     pub webhook_url: Option<String>,
+    pub webhook_port: u16,
+    pub webhook_secret: Option<String>,
 
     /// Bot username (without @) for deep link construction.
     /// Optional - will be fetched via getMe if not set.
@@ -58,6 +60,10 @@ impl Config {
         };
 
         let webhook_url = env::var("WEBHOOK_URL").ok();
+        let webhook_port = env::var("WEBHOOK_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(8443);
 
         // Validate webhook URL is set if mode is webhook
         if bot_mode == BotMode::Webhook && webhook_url.is_none() {
@@ -77,10 +83,15 @@ impl Config {
             .map(|s| s.trim_start_matches('@').to_string())
             .filter(|s| !s.is_empty());
 
+        // Parse webhook secret
+        let webhook_secret = env::var("WEBHOOK_SECRET").ok().filter(|s| !s.is_empty());
+
         Self {
             bot_token: env::var("BOT_TOKEN").expect("BOT_TOKEN must be set"),
             bot_mode,
             webhook_url,
+            webhook_port,
+            webhook_secret,
             bot_username,
             owner_ids,
             mongodb_uri: env::var("MONGODB_URI").expect("MONGODB_URI must be set"),

@@ -45,7 +45,7 @@ impl CachedUser {
     }
 
     /// Get display name (first name or username).
-    pub fn display_name(&self) -> &str {
+    pub fn _display_name(&self) -> &str {
         &self.first_name
     }
 }

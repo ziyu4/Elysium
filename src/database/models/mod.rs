@@ -23,5 +23,5 @@ pub use filter::{Filter, MatchType};
 pub use group::GroupSettings;
 pub use notes::{Note, NoteTags};
 pub use user::CachedUser;
-pub use warn::{WarnConfig, WarnMode, Warning, UserWarns};
+pub use warn::{WarnMode, Warning, UserWarns};
 pub use welcome::WelcomeConfig;

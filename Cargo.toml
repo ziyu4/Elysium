@@ -5,12 +5,23 @@ edition = "2024"
 description = "A modular Telegram bot framework for group management"
 authors = ["Elysium Team"]
 
+[[bin]]
+name = "elysium"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "unwind"
+strip = true
+codegen-units = 1
+
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 
 # Telegram
-teloxide = { version = "0.13", features = ["macros", "throttle"] }
+teloxide = { version = "0.13", features = ["macros", "throttle", "webhooks-axum"] }
 
 # Database
 mongodb = "3.1"
@@ -36,3 +47,11 @@ chrono = { version = "0.4", features = ["serde"] }
 # Caching
 moka = { version = "0.12", features = ["sync"] }
 dashmap = "6"
+
+# Webhook
+axum = "0.7"
+url = "2"
+
+# Allocator
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.5"

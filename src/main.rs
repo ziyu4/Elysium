@@ -33,6 +33,13 @@ use cache::CacheRegistry;
 use config::Config;
 use database::Database;
 
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Load .env file first (before anything else)
@@ -89,10 +96,10 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Build dispatcher
-    let dispatcher = bot::build_dispatcher(bot, db, cache, config.owner_ids.clone(), bot_username);
+    let dispatcher = bot::build_dispatcher(bot.clone(), db, cache, config.owner_ids.clone(), bot_username);
 
     // Run the bot
-    bot::run(&config, dispatcher).await;
+    bot::run(&config, dispatcher, bot).await;
 
     Ok(())
 }
