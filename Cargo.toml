@@ -1,0 +1,38 @@
+[package]
+name = "elysium"
+version = "0.1.0"
+edition = "2024"
+description = "A modular Telegram bot framework for group management"
+authors = ["Elysium Team"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+
+# Telegram
+teloxide = { version = "0.13", features = ["macros", "throttle"] }
+
+# Database
+mongodb = "3.1"
+
+# Config
+dotenvy = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utils
+once_cell = "1"
+parking_lot = "0.12"
+chrono = { version = "0.4", features = ["serde"] }
+
+# Caching
+moka = { version = "0.12", features = ["sync"] }
+dashmap = "6"
