@@ -15,7 +15,6 @@ pub use repository::{
     ByeRepository,
     RulesRepository,
     WarnsRepository,
-    GroupSettingsRepo,
 };
 pub use users::UserRepo;
 

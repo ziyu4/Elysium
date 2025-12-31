@@ -200,21 +200,4 @@ impl FilterRepository {
 
         Ok(false)
     }
-
-    /// Get cache statistics for monitoring.
-    pub fn cache_stats(&self) -> CacheStats {
-        CacheStats {
-            hot_items: self.hit_counter.iter()
-                .filter(|e| e.value().load(Ordering::Relaxed) >= HOT_PROMOTION_THRESHOLD)
-                .count(),
-            tracked_items: self.hit_counter.len(),
-        }
-    }
-}
-
-/// Cache statistics for monitoring.
-#[derive(Debug, Clone)]
-pub struct CacheStats {
-    pub hot_items: usize,
-    pub tracked_items: usize,
 }

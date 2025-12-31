@@ -131,20 +131,4 @@ impl WarnsRepository {
             .unwrap_or(0);
         Ok(count)
     }
-
-    /// Update warn config.
-    pub async fn update_config(
-        &self,
-        chat_id: i64,
-        config: crate::database::models::WarnConfig,
-    ) -> Result<()> {
-        let mut data = self.get_or_create(chat_id).await?;
-        data.config = config;
-        self.save(&data).await
-    }
-
-    /// Invalidate cache.
-    pub fn invalidate(&self, chat_id: i64) {
-        self.cache.invalidate(&chat_id);
-    }
 }

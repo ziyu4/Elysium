@@ -60,7 +60,7 @@ impl CachedUser {
     }
 
     /// Get display name (first name or username).
-    pub fn display_name(&self) -> String {
+    pub fn _display_name(&self) -> String {
         self.username_display
             .as_ref()
             .map(|u| format!("@{}", u))

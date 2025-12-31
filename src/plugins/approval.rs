@@ -7,7 +7,7 @@ use teloxide::types::{ParseMode, ReplyParameters};
 use tracing::info;
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
-use crate::database::GroupSettingsRepo;
+
 
 /// Handle /approve command - approve a user.
 pub async fn approve_command(
@@ -55,16 +55,13 @@ pub async fn approve_command(
         }
     };
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
-    let chat_title = settings.title.clone().unwrap_or_else(|| "grup ini".to_string());
+    let chat_title = msg.chat.title().unwrap_or("grup ini");
 
-    if settings.approve_user(target_id) {
-        repo.save(&settings).await?;
+    if state.message_context.approve_user(chat_id.0, target_id).await? {
         let message = format!(
             "✅ {} telah disetujui di <b>{}</b>!\n\n\
             Mereka sekarang akan diabaikan oleh tindakan otomatis seperti antiflood dan antispam.",
-            target_name, html_escape(&chat_title)
+            target_name, html_escape(chat_title)
         );
         bot.send_message(chat_id, message)
             .parse_mode(ParseMode::Html)
@@ -122,11 +119,7 @@ pub async fn unapprove_command(
         }
     };
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
-
-    if settings.unapprove_user(target_id) {
-        repo.save(&settings).await?;
+    if state.message_context.unapprove_user(chat_id.0, target_id).await? {
         let message = format!(
             "✅ {} telah dihapus dari daftar persetujuan.\n\n\
             Mereka sekarang tidak lagi bypass antiflood/antispam.",
@@ -177,11 +170,7 @@ pub async fn unapproveall_command(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
-
-    let count = settings.unapprove_all();
-    repo.save(&settings).await?;
+    let count = state.message_context.unapprove_all(chat_id.0).await?;
 
     bot.send_message(
         chat_id,
@@ -214,10 +203,9 @@ pub async fn approval_command(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let settings = repo.get_or_create(chat_id.0).await?;
+    let ctx = state.message_context.get_or_default(chat_id.0).await?;
 
-    let status = if settings.is_approved(user.id.0) {
+    let status = if ctx.is_approved(user.id.0) {
         "✅ Anda sudah <b>disetujui</b> di grup ini.\n\nAnda akan mengabaikan tindakan otomatis seperti antiflood dan antispam."
     } else {
         "❌ Anda <b>belum disetujui</b> di grup ini."
@@ -242,10 +230,9 @@ pub async fn approved_command(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let settings = repo.get_or_create(chat_id.0).await?;
+    let ctx = state.message_context.get_or_default(chat_id.0).await?;
 
-    if settings.approved_users.is_empty() {
+    if ctx.approved_users.is_empty() {
         bot.send_message(chat_id, "📋 Belum ada user yang disetujui di grup ini.")
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
@@ -254,7 +241,7 @@ pub async fn approved_command(
 
     // Build list of approved users
     let mut list = String::from("<b>📋 Daftar User yang Disetujui</b>\n\n");
-    for (i, user_id) in settings.approved_users.iter().enumerate() {
+    for (i, user_id) in ctx.approved_users.iter().enumerate() {
         list.push_str(&format!(
             "{}. <a href=\"tg://user?id={}\">{}</a>\n",
             i + 1,
@@ -262,7 +249,7 @@ pub async fn approved_command(
             user_id
         ));
     }
-    list.push_str(&format!("\n<i>Total: {} user</i>", settings.approved_users.len()));
+    list.push_str(&format!("\n<i>Total: {} user</i>", ctx.approved_users.len()));
 
     bot.send_message(chat_id, list)
         .parse_mode(ParseMode::Html)

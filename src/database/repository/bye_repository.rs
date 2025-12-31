@@ -77,23 +77,4 @@ impl ByeRepository {
 
         Ok(())
     }
-
-    /// Update bye message.
-    pub async fn set_message(&self, chat_id: i64, message: Option<String>) -> Result<()> {
-        let mut settings = self.get_or_create(chat_id).await?;
-        settings.message = message;
-        self.save(&settings).await
-    }
-
-    /// Set enabled state.
-    pub async fn set_enabled(&self, chat_id: i64, enabled: bool) -> Result<()> {
-        let mut settings = self.get_or_create(chat_id).await?;
-        settings.enabled = enabled;
-        self.save(&settings).await
-    }
-
-    /// Invalidate cache.
-    pub fn invalidate(&self, chat_id: i64) {
-        self.cache.invalidate(&chat_id);
-    }
 }

@@ -1,13 +1,13 @@
 //! Rules command handlers.
 //!
 //! Commands for setting and viewing group rules.
+//! Refactored to use decentralized RulesRepository.
 
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, ReplyParameters};
 use tracing::info;
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
-use crate::database::GroupSettingsRepo;
 
 /// Handle /rules command - show group rules.
 pub async fn rules_command(
@@ -24,10 +24,9 @@ pub async fn rules_command(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let settings = repo.get_or_create(chat_id.0).await?;
+    let settings = state.rules.get_or_create(chat_id.0).await?;
 
-    let rules_text = match &settings.rules.text {
+    let rules_text = match &settings.text {
         Some(text) if !text.trim().is_empty() => text,
         _ => {
             bot.send_message(chat_id, "📜 Belum ada peraturan yang ditetapkan untuk grup ini.")
@@ -37,7 +36,7 @@ pub async fn rules_command(
         }
     };
 
-    if settings.rules.show_in_pm {
+    if settings.show_in_pm {
         // Show button to view in PM using state.bot_username
         let deep_link = format!(
             "https://t.me/{}?start=rules_{}",
@@ -45,7 +44,7 @@ pub async fn rules_command(
         );
 
         let keyboard = InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::url(
-            &settings.rules.button_text,
+            &settings.button_text,
             deep_link.parse().unwrap(),
         )]]);
 
@@ -121,10 +120,8 @@ pub async fn setrules_command(
 
     let rules_text = rules_text.unwrap();
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
-    settings.rules.text = Some(rules_text);
-    repo.save(&settings).await?;
+    // Use RulesRepository specific method
+    state.rules.set_rules(chat_id.0, Some(rules_text)).await?;
 
     bot.send_message(chat_id, "✅ Peraturan grup berhasil diatur!\nGunakan /rules untuk melihat.")
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -158,10 +155,8 @@ pub async fn clearrules_command(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
-    settings.rules.text = None;
-    repo.save(&settings).await?;
+    // Use RulesRepository specific method
+    state.rules.clear_rules(chat_id.0).await?;
 
     bot.send_message(chat_id, "✅ Peraturan grup telah dihapus.")
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -197,16 +192,15 @@ pub async fn setrulesprivate_command(
     let text = msg.text().unwrap_or("");
     let args: Vec<&str> = text.split_whitespace().skip(1).collect();
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
+    let mut settings = state.rules.get_or_create(chat_id.0).await?;
 
     if args.is_empty() {
         // Toggle
-        settings.rules.show_in_pm = !settings.rules.show_in_pm;
+        settings.show_in_pm = !settings.show_in_pm;
     } else {
         match args[0].to_lowercase().as_str() {
-            "on" | "yes" | "true" | "pm" => settings.rules.show_in_pm = true,
-            "off" | "no" | "false" | "group" => settings.rules.show_in_pm = false,
+            "on" | "yes" | "true" | "pm" => settings.show_in_pm = true,
+            "off" | "no" | "false" | "group" => settings.show_in_pm = false,
             _ => {
                 bot.send_message(
                     chat_id,
@@ -221,9 +215,9 @@ pub async fn setrulesprivate_command(
         }
     }
 
-    repo.save(&settings).await?;
+    state.rules.save(&settings).await?;
 
-    let mode = if settings.rules.show_in_pm {
+    let mode = if settings.show_in_pm {
         "di PM (pesan pribadi)"
     } else {
         "langsung di grup"
@@ -255,17 +249,16 @@ pub async fn handle_rules_deeplink(
         }
     };
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let settings = match repo.get(group_chat_id).await? {
+    let settings = match state.rules.get(group_chat_id).await? {
         Some(s) => s,
         None => {
-            bot.send_message(private_chat_id, "❌ Grup tidak ditemukan.")
+            bot.send_message(private_chat_id, "❌ Grup tidak ditemukan atau belum ada peraturan.")
                 .await?;
             return Ok(());
         }
     };
 
-    let rules_text = match &settings.rules.text {
+    let rules_text = match &settings.text {
         Some(text) if !text.trim().is_empty() => text,
         _ => {
             bot.send_message(private_chat_id, "📜 Belum ada peraturan untuk grup ini.")
@@ -274,10 +267,15 @@ pub async fn handle_rules_deeplink(
         }
     };
 
-    let group_name = settings.title.as_deref().unwrap_or("Grup");
+    // This provides robustness against stale titles
+    let group_name = match bot.get_chat(ChatId(group_chat_id)).await {
+        Ok(chat) => chat.title().map(|t| t.to_string()).unwrap_or("Grup".to_string()),
+        Err(_) => "Grup".to_string(),
+    };
+
     let formatted = format!(
         "<b>📜 Peraturan {}</b>\n\n{}",
-        html_escape(group_name),
+        html_escape(&group_name),
         rules_text
     );
 

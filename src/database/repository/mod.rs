@@ -7,7 +7,7 @@ mod welcome_repository;
 mod bye_repository;
 mod rules_repository;
 mod warns_repository;
-mod group_settings_repo;
+
 
 pub use filter_repository::FilterRepository;
 pub use note_repository::NoteRepository;
@@ -16,6 +16,5 @@ pub use welcome_repository::WelcomeRepository;
 pub use bye_repository::ByeRepository;
 pub use rules_repository::RulesRepository;
 pub use warns_repository::WarnsRepository;
-pub use group_settings_repo::GroupSettingsRepo;
 
 

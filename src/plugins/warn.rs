@@ -4,15 +4,16 @@
 
 use teloxide::prelude::*;
 use teloxide::types::{
-    ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup, MessageEntityKind, ParseMode,
+    ChatId, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup, MessageEntityKind, ParseMode,
     ReplyParameters, UserId,
 };
 use tracing::info;
 
-use crate::bot::dispatcher::{AppState, ThrottledBot};
-use crate::database::{GroupSettingsRepo, Warning, WarnMode, UserWarns};
+use crate::database::WarnMode;
 use crate::utils::parser::format_duration_full as format_duration;
 use crate::utils::{html_escape, parse_duration};
+
+use crate::bot::dispatcher::{AppState, ThrottledBot};
 
 /// Handle /warn command.
 pub async fn warn_command(bot: ThrottledBot, msg: Message, state: AppState) -> anyhow::Result<()> {
@@ -83,7 +84,6 @@ async fn warn_action(
     }
 
     // Extract reason
-    // Extract reason - skip command + optional target args
     let text = msg.text().unwrap_or("");
     let reason = text
         .split_whitespace()
@@ -97,37 +97,29 @@ async fn warn_action(
     };
 
     // Delete messages based on action
-    if action == WarnAction::DeleteMsg
-        && let Some(reply) = msg.reply_to_message() {
+    if action == WarnAction::DeleteMsg {
+        if let Some(reply) = msg.reply_to_message() {
             let _ = bot.delete_message(chat_id, reply.id).await;
         }
+    }
     if action == WarnAction::Silent {
         let _ = bot.delete_message(chat_id, msg.id).await;
     }
 
-    // Add warning
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
+    // Add warning using WarnsRepository
+    // Note: add_warning returns the NEW count
+    let warn_count = state.warns.add_warning(
+        chat_id.0, 
+        target_id.0, 
+        reason.clone(), 
+        admin_id.0
+    ).await?;
 
-    // Find or create user warns
-    let user_warns = settings.user_warns.iter_mut().find(|uw| uw.user_id == target_id.0);
-    let user_warns = if let Some(uw) = user_warns {
-        uw
-    } else {
-        settings.user_warns.push(UserWarns::new(target_id.0));
-        settings.user_warns.last_mut().unwrap()
-    };
+    // Check limit
+    // Need to fetch config to know limit
+    let warns_data = state.warns.get_or_create(chat_id.0).await?;
+    let limit = warns_data.config.limit;
 
-    // Clean expired warnings first
-    user_warns.clean_expired(settings.warn.warn_time_secs);
-
-    // Add new warning
-    user_warns.add_warning(Warning::new(reason.clone(), admin_id.0));
-
-    let warn_count = user_warns.active_count(settings.warn.warn_time_secs);
-    let limit = settings.warn.limit;
-
-    // Check if limit reached
     if warn_count as u32 >= limit {
         // Apply penalty
         let penalty_result = apply_warn_penalty(
@@ -135,13 +127,12 @@ async fn warn_action(
             chat_id,
             target_id,
             &target_name,
-            &settings.warn.mode,
-            settings.warn.action_duration_secs,
+            &warns_data.config.mode,
+            warns_data.config.action_duration_secs,
         ).await;
 
         // Clear user warnings after penalty
-        user_warns.clear();
-        repo.save(&settings).await?;
+        state.warns.reset_warnings(chat_id.0, target_id.0).await?;
 
         if action != WarnAction::Silent {
             let penalty_msg = match penalty_result {
@@ -162,8 +153,7 @@ async fn warn_action(
 
         info!("User {} reached warn limit in chat {}, penalty applied", target_id, chat_id);
     } else {
-        repo.save(&settings).await?;
-
+        // Just warning
         if action != WarnAction::Silent {
             let reason_text = reason.as_deref().unwrap_or("Tidak ada alasan");
             let keyboard = InlineKeyboardMarkup::new(vec![vec![
@@ -260,11 +250,11 @@ pub async fn warns_command(bot: ThrottledBot, msg: Message, state: AppState) -> 
         return Ok(());
     };
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let settings = repo.get_or_create(chat_id.0).await?;
+    let data = state.warns.get_or_create(chat_id.0).await?;
 
-    let user_warns = settings.user_warns.iter().find(|uw| uw.user_id == target_id.0);
-    let count = user_warns.map(|uw| uw.active_count(settings.warn.warn_time_secs)).unwrap_or(0);
+    let user_warns = data.get_user(target_id.0);
+    // Note: get_user returns Option<&UserWarns>, we need to access it
+    let count = user_warns.map(|uw| uw.active_count(data.config.warn_time_secs)).unwrap_or(0);
 
     let message = if count == 0 {
         format!(
@@ -277,12 +267,12 @@ pub async fn warns_command(bot: ThrottledBot, msg: Message, state: AppState) -> 
             target_id,
             html_escape(&target_name),
             count,
-            settings.warn.limit
+            data.config.limit
         );
 
         if let Some(uw) = user_warns {
             for (i, w) in uw.warnings.iter().enumerate() {
-                if !w.is_expired(settings.warn.warn_time_secs) {
+                if !w.is_expired(data.config.warn_time_secs) {
                     let reason = w.reason.as_deref().unwrap_or("Tidak ada alasan");
                     text.push_str(&format!("{}. {}\n", i + 1, html_escape(reason)));
                 }
@@ -328,35 +318,26 @@ pub async fn rmwarn_command(bot: ThrottledBot, msg: Message, state: AppState) ->
         }
     };
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
-    let warn_time = settings.warn.warn_time_secs;
-    let limit = settings.warn.limit;
+    // Use Repo to remove
+    let removed = state.warns.remove_warning(chat_id.0, target_id.0).await?;
 
-    let user_warns = settings.user_warns.iter_mut().find(|uw| uw.user_id == target_id.0);
-
-    if let Some(uw) = user_warns {
-        if uw.remove_latest().is_some() {
-            let count = uw.active_count(warn_time);
-            repo.save(&settings).await?;
-            bot.send_message(
-                chat_id,
-                format!(
-                    "✅ Peringatan terakhir untuk <a href=\"tg://user?id={}\">{}</a> telah dihapus.\nPeringatan tersisa: {}/{}",
-                    target_id,
-                    html_escape(&target_name),
-                    count,
-                    limit
-                ),
-            )
-            .parse_mode(ParseMode::Html)
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
-        } else {
-            bot.send_message(chat_id, "ℹ️ User tidak memiliki peringatan.")
-                .reply_parameters(ReplyParameters::new(msg.id))
-                .await?;
-        }
+    if removed {
+        let count = state.warns.get_warning_count(chat_id.0, target_id.0).await?;
+        let data = state.warns.get_or_create(chat_id.0).await?;
+        
+        bot.send_message(
+            chat_id,
+            format!(
+                "✅ Peringatan terakhir untuk <a href=\"tg://user?id={}\">{}</a> telah dihapus.\nPeringatan tersisa: {}/{}",
+                target_id,
+                html_escape(&target_name),
+                count,
+                data.config.limit
+            ),
+        )
+        .parse_mode(ParseMode::Html)
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
     } else {
         bot.send_message(chat_id, "ℹ️ User tidak memiliki peringatan.")
             .reply_parameters(ReplyParameters::new(msg.id))
@@ -394,15 +375,9 @@ pub async fn resetwarn_command(bot: ThrottledBot, msg: Message, state: AppState)
         }
     };
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
+    let removed = state.warns.reset_warnings(chat_id.0, target_id.0).await?;
 
-    // Remove user from user_warns
-    let original_len = settings.user_warns.len();
-    settings.user_warns.retain(|uw| uw.user_id != target_id.0);
-
-    if settings.user_warns.len() < original_len {
-        repo.save(&settings).await?;
+    if removed {
         bot.send_message(
             chat_id,
             format!(
@@ -443,12 +418,11 @@ pub async fn resetallwarns_command(bot: ThrottledBot, msg: Message, state: AppSt
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
-
-    let count = settings.user_warns.len();
-    settings.user_warns.clear();
-    repo.save(&settings).await?;
+    // Manual access needed to clear everything
+    let mut data = state.warns.get_or_create(chat_id.0).await?;
+    let count = data.user_warns.len();
+    data.user_warns.clear();
+    state.warns.save(&data).await?;
 
     bot.send_message(
         chat_id,
@@ -470,10 +444,9 @@ pub async fn warnings_command(bot: ThrottledBot, msg: Message, state: AppState) 
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let settings = repo.get_or_create(chat_id.0).await?;
+    let data = state.warns.get_or_create(chat_id.0).await?;
 
-    let warn_time = match settings.warn.warn_time_secs {
+    let warn_time = match data.config.warn_time_secs {
         Some(secs) => format_duration(secs),
         None => "Permanen (tidak kadaluarsa)".to_string(),
     };
@@ -484,10 +457,10 @@ pub async fn warnings_command(bot: ThrottledBot, msg: Message, state: AppState) 
         <b>Mode:</b> {} ({})\n\
         <b>Durasi hukuman:</b> {}\n\
         <b>Masa berlaku warn:</b> {}",
-        settings.warn.limit,
-        settings.warn.mode.as_str(),
-        settings.warn.mode.description(),
-        format_duration(settings.warn.action_duration_secs),
+        data.config.limit,
+        data.config.mode.as_str(),
+        data.config.mode.description(),
+        format_duration(data.config.action_duration_secs),
         warn_time
     );
 
@@ -519,18 +492,16 @@ pub async fn warnmode_command(bot: ThrottledBot, msg: Message, state: AppState) 
     let text = msg.text().unwrap_or("");
     let args: Vec<&str> = text.split_whitespace().skip(1).collect();
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-
     if args.is_empty() {
         // Show current
-        let settings = repo.get_or_create(chat_id.0).await?;
+        let data = state.warns.get_or_create(chat_id.0).await?;
         bot.send_message(
             chat_id,
             format!(
                 "Mode peringatan saat ini: <b>{}</b> ({})\n\n\
                 Mode tersedia: ban, mute, kick, tban, tmute",
-                settings.warn.mode.as_str(),
-                settings.warn.mode.description()
+                data.config.mode.as_str(),
+                data.config.mode.description()
             ),
         )
         .parse_mode(ParseMode::Html)
@@ -539,9 +510,9 @@ pub async fn warnmode_command(bot: ThrottledBot, msg: Message, state: AppState) 
     } else {
         match WarnMode::from_str(args[0]) {
             Some(mode) => {
-                let mut settings = repo.get_or_create(chat_id.0).await?;
-                settings.warn.mode = mode.clone();
-                repo.save(&settings).await?;
+                let mut data = state.warns.get_or_create(chat_id.0).await?;
+                data.config.mode = mode.clone();
+                state.warns.save(&data).await?;
                 bot.send_message(
                     chat_id,
                     format!(
@@ -588,13 +559,11 @@ pub async fn warnlimit_command(bot: ThrottledBot, msg: Message, state: AppState)
     let text = msg.text().unwrap_or("");
     let args: Vec<&str> = text.split_whitespace().skip(1).collect();
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-
     if args.is_empty() {
-        let settings = repo.get_or_create(chat_id.0).await?;
+        let data = state.warns.get_or_create(chat_id.0).await?;
         bot.send_message(
             chat_id,
-            format!("Batas peringatan saat ini: <b>{}</b>", settings.warn.limit),
+            format!("Batas peringatan saat ini: <b>{}</b>", data.config.limit),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -605,9 +574,9 @@ pub async fn warnlimit_command(bot: ThrottledBot, msg: Message, state: AppState)
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         } else {
-            let mut settings = repo.get_or_create(chat_id.0).await?;
-            settings.warn.limit = limit;
-            repo.save(&settings).await?;
+            let mut data = state.warns.get_or_create(chat_id.0).await?;
+            data.config.limit = limit;
+            state.warns.save(&data).await?;
             bot.send_message(
                 chat_id,
                 format!("✅ Batas peringatan diubah ke <b>{}</b>.", limit),
@@ -645,11 +614,9 @@ pub async fn warntime_command(bot: ThrottledBot, msg: Message, state: AppState) 
     let text = msg.text().unwrap_or("");
     let args: Vec<&str> = text.split_whitespace().skip(1).collect();
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-
     if args.is_empty() {
-        let settings = repo.get_or_create(chat_id.0).await?;
-        let warn_time = match settings.warn.warn_time_secs {
+        let data = state.warns.get_or_create(chat_id.0).await?;
+        let warn_time = match data.config.warn_time_secs {
             Some(secs) => format_duration(secs),
             None => "Permanen (tidak kadaluarsa)".to_string(),
         };
@@ -661,17 +628,17 @@ pub async fn warntime_command(bot: ThrottledBot, msg: Message, state: AppState) 
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
     } else if args[0].to_lowercase() == "off" {
-        let mut settings = repo.get_or_create(chat_id.0).await?;
-        settings.warn.warn_time_secs = None;
-        repo.save(&settings).await?;
+        let mut data = state.warns.get_or_create(chat_id.0).await?;
+        data.config.warn_time_secs = None;
+        state.warns.save(&data).await?;
         bot.send_message(chat_id, "✅ Peringatan sekarang bersifat permanen (tidak kadaluarsa).")
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
     } else if let Some(duration) = parse_duration(args[0]) {
         let secs = duration.as_secs();
-        let mut settings = repo.get_or_create(chat_id.0).await?;
-        settings.warn.warn_time_secs = Some(secs);
-        repo.save(&settings).await?;
+        let mut data = state.warns.get_or_create(chat_id.0).await?;
+        data.config.warn_time_secs = Some(secs);
+        state.warns.save(&data).await?;
         bot.send_message(
             chat_id,
             format!("✅ Masa berlaku peringatan diubah ke <b>{}</b>.", format_duration(secs)),
@@ -731,55 +698,47 @@ pub async fn warn_callback_handler(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id).await?;
+    // Attempt removal via Repo
+    let removed = state.warns.remove_warning(chat_id, target_id).await?;
 
-    let user_warns = settings.user_warns.iter_mut().find(|uw| uw.user_id == target_id);
+    if removed {
+        let count = state.warns.get_warning_count(chat_id, target_id).await?;
+        let data = state.warns.get_or_create(chat_id).await?;
 
-    if let Some(uw) = user_warns {
-        if uw.remove_latest().is_some() {
-            let remaining = uw.active_count(settings.warn.warn_time_secs);
-            repo.save(&settings).await?;
-
-            // Get target name from UserRepo
-            let target_name = if let Ok(Some(user)) = state.users.get_by_id(target_id).await {
-                user.first_name
-            } else {
-                format!("User {}", target_id)
-            };
-
-            // Update the message with proper mentions
-            if let Some(msg) = &q.message {
-                let admin_mention = format!(
-                    "<a href=\"tg://user?id={}\">{}</a>",
-                    q.from.id,
-                    html_escape(&q.from.first_name)
-                );
-                let target_mention = format!(
-                    "<a href=\"tg://user?id={}\">{}</a>",
-                    target_id,
-                    html_escape(&target_name)
-                );
-                let new_text = format!(
-                    "✅ Admin {} telah menghapus peringatan {}.\nPeringatan tersisa: {}/{}",
-                    admin_mention,
-                    target_mention,
-                    remaining,
-                    settings.warn.limit
-                );
-                let _ = bot.edit_message_text(msg.chat().id, msg.id(), new_text)
-                    .parse_mode(ParseMode::Html)
-                    .await;
-            }
-
-            bot.answer_callback_query(&q.id)
-                .text("✅ Peringatan berhasil dihapus.")
-                .await?;
+        // Get target name from UserRepo
+        let target_name = if let Ok(Some(user)) = state.users.get_by_id(target_id).await {
+            user.first_name
         } else {
-            bot.answer_callback_query(&q.id)
-                .text("ℹ️ User tidak memiliki peringatan.")
-                .await?;
+            format!("User {}", target_id)
+        };
+
+        // Update the message with proper mentions
+        if let Some(msg) = &q.message {
+            let admin_mention = format!(
+                "<a href=\"tg://user?id={}\">{}</a>",
+                q.from.id,
+                html_escape(&q.from.first_name)
+            );
+            let target_mention = format!(
+                "<a href=\"tg://user?id={}\">{}</a>",
+                target_id,
+                html_escape(&target_name)
+            );
+            let new_text = format!(
+                "✅ Admin {} telah menghapus peringatan {}.\nPeringatan tersisa: {}/{}",
+                admin_mention,
+                target_mention,
+                count,
+                data.config.limit
+            );
+            let _ = bot.edit_message_text(msg.chat().id, msg.id(), new_text)
+                .parse_mode(ParseMode::Html)
+                .await;
         }
+
+        bot.answer_callback_query(&q.id)
+            .text("✅ Peringatan berhasil dihapus.")
+            .await?;
     } else {
         bot.answer_callback_query(&q.id)
             .text("ℹ️ User tidak memiliki peringatan.")

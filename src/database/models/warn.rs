@@ -152,14 +152,4 @@ impl UserWarns {
             .filter(|w| !w.is_expired(warn_time_secs))
             .count()
     }
-
-    /// Clean expired warnings.
-    pub fn clean_expired(&mut self, warn_time_secs: Option<u64>) {
-        self.warnings.retain(|w| !w.is_expired(warn_time_secs));
-    }
-
-    /// Clear all warnings.
-    pub fn clear(&mut self) {
-        self.warnings.clear();
-    }
 }

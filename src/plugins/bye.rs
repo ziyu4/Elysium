@@ -1,6 +1,7 @@
 //! Bye (Goodbye) command handlers.
 //!
 //! Commands for configuring goodbye messages in groups.
+//! Refactored to use decentralized ByeRepository.
 
 use teloxide::prelude::*;
 use teloxide::types::{
@@ -9,7 +10,7 @@ use teloxide::types::{
 use tracing::info;
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
-use crate::database::{ByeConfig, GroupSettingsRepo, InlineButton};
+use crate::database::{ByeSettings, InlineButton};
 
 /// Handle /bye command - show or toggle goodbye.
 pub async fn bye_command(
@@ -42,15 +43,14 @@ pub async fn bye_command(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let settings = repo.get_or_create(chat_id.0).await?;
+    let settings = state.bye.get_or_create(chat_id.0).await?;
 
     let text = msg.text().unwrap_or("");
     let args: Vec<&str> = text.split_whitespace().skip(1).collect();
 
     if args.is_empty() {
         // Show current bye settings
-        let status = format_bye_status(&settings.bye);
+        let status = format_bye_status(&settings);
         bot.send_message(chat_id, status)
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
@@ -61,23 +61,23 @@ pub async fn bye_command(
     match args[0].to_lowercase().as_str() {
         "on" | "enable" => {
             let mut new_settings = settings.clone();
-            new_settings.bye.enabled = true;
-            repo.save(&new_settings).await?;
+            new_settings.enabled = true;
+            state.bye.save(&new_settings).await?;
             bot.send_message(chat_id, "✅ Goodbye message diaktifkan!")
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         }
         "off" | "disable" => {
             let mut new_settings = settings.clone();
-            new_settings.bye.enabled = false;
-            repo.save(&new_settings).await?;
+            new_settings.enabled = false;
+            state.bye.save(&new_settings).await?;
             bot.send_message(chat_id, "❌ Goodbye message dinonaktifkan!")
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         }
         "preview" => {
             // Show preview of goodbye message
-            send_bye_preview(&bot, chat_id, &settings.bye, &msg).await?;
+            send_bye_preview(&bot, chat_id, &settings, &msg).await?;
         }
         _ => {
             bot.send_message(
@@ -124,8 +124,7 @@ pub async fn setbye_command(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
+    let mut settings = state.bye.get_or_create(chat_id.0).await?;
 
     // Check if replying to a message
     let replied = msg.reply_to_message();
@@ -140,25 +139,25 @@ pub async fn setbye_command(
         let (message_text, media_file_id, media_type) = extract_message_content(reply);
 
         if let Some(text) = message_text.or_else(|| args_text.map(String::from)) {
-            settings.bye.message = Some(text);
+            settings.message = Some(text);
         }
 
         if let Some(file_id) = media_file_id {
-            settings.bye.media_file_id = Some(file_id);
-            settings.bye.media_type = media_type;
+            settings.media_file_id = Some(file_id);
+            settings.media_type = media_type;
         }
 
-        repo.save(&settings).await?;
+        state.bye.save(&settings).await?;
         bot.send_message(chat_id, "✅ Goodbye message berhasil diatur!")
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         info!("Goodbye message set in chat {}", chat_id);
     } else if let Some(text) = args_text {
         // Direct text after command
-        settings.bye.message = Some(text.to_string());
-        settings.bye.media_file_id = None;
-        settings.bye.media_type = None;
-        repo.save(&settings).await?;
+        settings.message = Some(text.to_string());
+        settings.media_file_id = None;
+        settings.media_type = None;
+        state.bye.save(&settings).await?;
         bot.send_message(chat_id, "✅ Goodbye message berhasil diatur!")
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
@@ -213,11 +212,11 @@ pub async fn setbyebuttons_command(
         .map(|(_, rest)| rest.trim())
         .unwrap_or("");
 
+    let mut settings = state.bye.get_or_create(chat_id.0).await?;
+
     if args.is_empty() || args == "clear" {
-        let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-        let mut settings = repo.get_or_create(chat_id.0).await?;
-        settings.bye.buttons.clear();
-        repo.save(&settings).await?;
+        settings.buttons.clear();
+        state.bye.save(&settings).await?;
 
         if args == "clear" {
             bot.send_message(chat_id, "✅ Tombol goodbye dihapus!")
@@ -249,10 +248,8 @@ pub async fn setbyebuttons_command(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
-    settings.bye.buttons = buttons;
-    repo.save(&settings).await?;
+    settings.buttons = buttons;
+    state.bye.save(&settings).await?;
 
     bot.send_message(chat_id, "✅ Tombol goodbye berhasil diatur!")
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -285,10 +282,9 @@ pub async fn resetbye_command(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
-    settings.bye = ByeConfig::default();
-    repo.save(&settings).await?;
+    let mut settings = state.bye.get_or_create(chat_id.0).await?;
+    settings = ByeSettings::new(chat_id.0); // Reset to default
+    state.bye.save(&settings).await?;
 
     bot.send_message(chat_id, "✅ Goodbye message direset ke default!")
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -405,21 +401,21 @@ fn try_parse_button(chars: &[char], start: usize) -> Option<(InlineButton, usize
     Some((InlineButton { text, url }, i))
 }
 
-fn format_bye_status(config: &ByeConfig) -> String {
-    let status = if config.enabled { "✅ Aktif" } else { "❌ Nonaktif" };
-    let message = config
+fn format_bye_status(settings: &ByeSettings) -> String {
+    let status = if settings.enabled { "✅ Aktif" } else { "❌ Nonaktif" };
+    let message = settings
         .message
         .as_deref()
         .unwrap_or("<i>Tidak ada</i>");
-    let media = if config.media_file_id.is_some() {
-        format!("✅ {} terlampir", config.media_type.as_deref().unwrap_or("Media"))
+    let media = if settings.media_file_id.is_some() {
+        format!("✅ {} terlampir", settings.media_type.as_deref().unwrap_or("Media"))
     } else {
         "❌ Tidak ada".to_string()
     };
-    let buttons = if config.buttons.is_empty() {
+    let buttons = if settings.buttons.is_empty() {
         "❌ Tidak ada".to_string()
     } else {
-        let count: usize = config.buttons.iter().map(|r| r.len()).sum();
+        let count: usize = settings.buttons.iter().map(|r| r.len()).sum();
         format!("✅ {} tombol", count)
     };
 
@@ -436,20 +432,20 @@ fn format_bye_status(config: &ByeConfig) -> String {
 async fn send_bye_preview(
     bot: &ThrottledBot,
     chat_id: ChatId,
-    config: &ByeConfig,
+    settings: &ByeSettings,
     msg: &Message,
 ) -> anyhow::Result<()> {
     let user = msg.from.as_ref().unwrap();
     let formatted = format_bye_text(
-        config.message.as_deref().unwrap_or("Selamat tinggal!"),
+        settings.message.as_deref().unwrap_or("Selamat tinggal!"),
         user,
         msg.chat.title().unwrap_or("Grup"),
     );
 
-    let keyboard = build_bye_keyboard(&config.buttons);
+    let keyboard = build_bye_keyboard(&settings.buttons);
 
-    if let Some(ref file_id) = config.media_file_id {
-        match config.media_type.as_deref() {
+    if let Some(ref file_id) = settings.media_file_id {
+        match settings.media_type.as_deref() {
             Some("photo") => {
                 bot.send_photo(chat_id, InputFile::file_id(file_id))
                     .caption(formatted)

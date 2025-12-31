@@ -8,7 +8,7 @@ use teloxide::types::{ParseMode, ReplyParameters};
 use tracing::info;
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
-use crate::database::{FloodPenalty, GroupSettingsRepo};
+use crate::database::FloodPenalty;
 
 /// Handle /antiflood command - show or toggle antiflood.
 pub async fn antiflood_command(
@@ -43,8 +43,7 @@ pub async fn antiflood_command(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let settings = repo.get_or_create(chat_id.0).await?;
+    let mut ctx = state.message_context.get_or_default(chat_id.0).await?;
 
     // Parse arguments
     let text = msg.text().unwrap_or("");
@@ -52,18 +51,18 @@ pub async fn antiflood_command(
 
     if args.is_empty() {
         // Show current status
-        let status = if settings.antiflood.enabled {
+        let status = if ctx.antiflood.enabled {
             format!(
                 "✅ <b>Antiflood Aktif</b>\n\n\
                 📊 Limit: <code>{}</code> pesan dalam <code>{}</code> detik\n\
                 ⚠️ Peringatan sebelum aksi: <code>{}</code>\n\
                 🔨 Hukuman: {}\n\
                 ⏱️ Durasi: {}",
-                settings.antiflood.max_messages,
-                settings.antiflood.time_window_secs,
-                settings.antiflood.warnings_before_penalty,
-                penalty_to_string(&settings.antiflood.penalty),
-                duration_to_string(settings.antiflood.penalty_duration_secs)
+                ctx.antiflood.max_messages,
+                ctx.antiflood.time_window_secs,
+                ctx.antiflood.warnings_before_penalty,
+                penalty_to_string(&ctx.antiflood.penalty),
+                duration_to_string(ctx.antiflood.penalty_duration_secs)
             )
         } else {
             "❌ <b>Antiflood Nonaktif</b>\n\nGunakan <code>/antiflood on</code> untuk mengaktifkan.".to_string()
@@ -78,18 +77,16 @@ pub async fn antiflood_command(
 
     match args[0].to_lowercase().as_str() {
         "on" | "enable" => {
-            let mut new_settings = settings.clone();
-            new_settings.antiflood.enabled = true;
-            repo.save(&new_settings).await?;
+            ctx.antiflood.enabled = true;
+            state.message_context.update_antiflood(chat_id.0, ctx.antiflood).await?;
             bot.send_message(chat_id, "✅ Antiflood diaktifkan!")
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             info!("Antiflood enabled in chat {}", chat_id);
         }
         "off" | "disable" => {
-            let mut new_settings = settings.clone();
-            new_settings.antiflood.enabled = false;
-            repo.save(&new_settings).await?;
+            ctx.antiflood.enabled = false;
+            state.message_context.update_antiflood(chat_id.0, ctx.antiflood).await?;
             bot.send_message(chat_id, "❌ Antiflood dinonaktifkan!")
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
@@ -178,11 +175,10 @@ pub async fn setflood_command(
         }
     };
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
-    settings.antiflood.max_messages = max_messages;
-    settings.antiflood.time_window_secs = time_window;
-    repo.save(&settings).await?;
+    let mut ctx = state.message_context.get_or_default(chat_id.0).await?;
+    ctx.antiflood.max_messages = max_messages;
+    ctx.antiflood.time_window_secs = time_window;
+    state.message_context.update_antiflood(chat_id.0, ctx.antiflood).await?;
 
     bot.send_message(
         chat_id,
@@ -258,11 +254,10 @@ pub async fn setfloodpenalty_command(
         300 // Default 5 minutes
     };
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
-    settings.antiflood.penalty = penalty.clone();
-    settings.antiflood.penalty_duration_secs = duration_secs;
-    repo.save(&settings).await?;
+    let mut ctx = state.message_context.get_or_default(chat_id.0).await?;
+    ctx.antiflood.penalty = penalty.clone();
+    ctx.antiflood.penalty_duration_secs = duration_secs;
+    state.message_context.update_antiflood(chat_id.0, ctx.antiflood.clone()).await?;
 
     bot.send_message(
         chat_id,

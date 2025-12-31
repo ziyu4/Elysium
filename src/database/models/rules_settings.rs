@@ -52,7 +52,7 @@ impl RulesSettings {
     }
 
     /// Check if rules are set.
-    pub fn has_rules(&self) -> bool {
+    pub fn _has_rules(&self) -> bool {
         self.text.as_ref().is_some_and(|t| !t.is_empty())
     }
 }

@@ -68,24 +68,6 @@ pub struct DbFilter {
 }
 
 impl DbFilter {
-    /// Create a new filter.
-    pub fn new(chat_id: i64, trigger: impl Into<String>, reply: impl Into<String>) -> Self {
-        Self {
-            id: None,
-            chat_id,
-            trigger: trigger.into().to_lowercase(),
-            match_type: MatchType::default(),
-            reply: reply.into(),
-            buttons: vec![],
-            media_file_id: None,
-            media_type: None,
-            admin_only: false,
-            user_only: false,
-            protect: false,
-            replytag: false,
-        }
-    }
-
     /// Check if a message matches this filter's trigger.
     pub fn matches(&self, message: &str) -> bool {
         let msg_lower = message.to_lowercase();

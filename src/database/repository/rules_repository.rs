@@ -89,9 +89,4 @@ impl RulesRepository {
     pub async fn clear_rules(&self, chat_id: i64) -> Result<()> {
         self.set_rules(chat_id, None).await
     }
-
-    /// Invalidate cache.
-    pub fn invalidate(&self, chat_id: i64) {
-        self.cache.invalidate(&chat_id);
-    }
 }

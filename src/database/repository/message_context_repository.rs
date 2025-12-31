@@ -50,7 +50,7 @@ impl MessageContextRepository {
     }
 
     /// Get context only if it exists.
-    pub async fn get(&self, chat_id: i64) -> Result<Option<MessageContext>> {
+    pub async fn _get(&self, chat_id: i64) -> Result<Option<MessageContext>> {
         if let Some(ctx) = self.cache.get(&chat_id) {
             return Ok(Some(ctx));
         }
@@ -122,10 +122,5 @@ impl MessageContextRepository {
             self.save(&ctx).await?;
         }
         Ok(count)
-    }
-
-    /// Invalidate cache for a chat.
-    pub fn invalidate(&self, chat_id: i64) {
-        self.cache.invalidate(&chat_id);
     }
 }

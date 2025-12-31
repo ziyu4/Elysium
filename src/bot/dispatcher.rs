@@ -12,6 +12,7 @@ use crate::cache::CacheRegistry;
 use crate::database::{
     Database, UserRepo, FilterRepository, NoteRepository,
     MessageContextRepository, WelcomeRepository, ByeRepository,
+    RulesRepository, WarnsRepository,
 };
 use crate::events::{self, FloodTracker};
 use crate::permissions::Permissions;
@@ -50,6 +51,12 @@ pub struct AppState {
     /// Bye repository.
     pub bye: Arc<ByeRepository>,
 
+    /// Rules repository.
+    pub rules: Arc<RulesRepository>,
+
+    /// Warns repository.
+    pub warns: Arc<WarnsRepository>,
+
     /// Owner user IDs (bypass all restrictions).
     pub owner_ids: Vec<u64>,
 
@@ -76,6 +83,8 @@ impl AppState {
         let message_context = Arc::new(MessageContextRepository::new(&db, &cache));
         let welcome = Arc::new(WelcomeRepository::new(&db, &cache));
         let bye = Arc::new(ByeRepository::new(&db, &cache));
+        let rules = Arc::new(RulesRepository::new(&db, &cache));
+        let warns = Arc::new(WarnsRepository::new(&db, &cache));
 
         Self {
             db,
@@ -87,6 +96,8 @@ impl AppState {
             message_context,
             welcome,
             bye,
+            rules,
+            warns,
             owner_ids,
             bot_username,
         }

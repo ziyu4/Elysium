@@ -1,17 +1,12 @@
 //! MessageContext model for per-message lookups.
 //!
 //! Lightweight struct containing only data needed for every-message checks
-//! (antiflood + approved users). Replaces monolithic GroupConfig for hot path.
-
-use std::collections::HashSet;
 
 use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
 
 use super::antiflood::AntifloodConfig;
 
-/// Lightweight context for per-message checks.
-/// ~200 bytes vs ~2KB for full GroupConfig.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageContext {
     /// MongoDB document ID
@@ -44,11 +39,6 @@ impl MessageContext {
             approved_users: Vec::new(),
             antiflood: AntifloodConfig::default(),
         }
-    }
-
-    /// Get approved users as HashSet for O(1) lookup.
-    pub fn approved_set(&self) -> HashSet<u64> {
-        self.approved_users.iter().copied().collect()
     }
 
     /// Check if a user is approved.

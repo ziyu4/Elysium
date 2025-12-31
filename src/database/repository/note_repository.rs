@@ -194,7 +194,7 @@ impl NoteRepository {
     }
 
     /// Delete all notes for a chat.
-    pub async fn delete_all(&self, chat_id: i64) -> Result<u64> {
+    pub async fn _delete_all(&self, chat_id: i64) -> Result<u64> {
         // Get all names first to clear hit counters
         if let Ok(names) = self.get_names(chat_id).await {
             for name in names {
@@ -212,21 +212,4 @@ impl NoteRepository {
 
         Ok(result.deleted_count)
     }
-
-    /// Get cache statistics for monitoring.
-    pub fn cache_stats(&self) -> NotesCacheStats {
-        NotesCacheStats {
-            hot_items: self.hit_counter.iter()
-                .filter(|e| e.value().load(Ordering::Relaxed) >= HOT_PROMOTION_THRESHOLD)
-                .count(),
-            tracked_items: self.hit_counter.len(),
-        }
-    }
-}
-
-/// Cache statistics for monitoring.
-#[derive(Debug, Clone)]
-pub struct NotesCacheStats {
-    pub hot_items: usize,
-    pub tracked_items: usize,
 }

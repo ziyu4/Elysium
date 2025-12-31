@@ -1,6 +1,7 @@
 //! Welcome command handlers.
 //!
 //! Commands for configuring welcome messages in groups.
+//! Refactored to use decentralized WelcomeRepository.
 
 use teloxide::prelude::*;
 use teloxide::types::{
@@ -9,7 +10,7 @@ use teloxide::types::{
 use tracing::info;
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
-use crate::database::{GroupSettingsRepo, InlineButton, WelcomeConfig};
+use crate::database::{InlineButton, WelcomeSettings};
 use crate::utils::html_escape;
 
 /// Handle /welcome command - show or toggle welcome.
@@ -43,15 +44,14 @@ pub async fn welcome_command(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let settings = repo.get_or_create(chat_id.0).await?;
+    let settings = state.welcome.get_or_create(chat_id.0).await?;
 
     let text = msg.text().unwrap_or("");
     let args: Vec<&str> = text.split_whitespace().skip(1).collect();
 
     if args.is_empty() {
         // Show current welcome settings
-        let status = format_welcome_status(&settings.welcome);
+        let status = format_welcome_status(&settings);
         bot.send_message(chat_id, status)
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
@@ -62,23 +62,23 @@ pub async fn welcome_command(
     match args[0].to_lowercase().as_str() {
         "on" | "enable" => {
             let mut new_settings = settings.clone();
-            new_settings.welcome.enabled = true;
-            repo.save(&new_settings).await?;
+            new_settings.enabled = true;
+            state.welcome.save(&new_settings).await?;
             bot.send_message(chat_id, "✅ Welcome message diaktifkan!")
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         }
         "off" | "disable" => {
             let mut new_settings = settings.clone();
-            new_settings.welcome.enabled = false;
-            repo.save(&new_settings).await?;
+            new_settings.enabled = false;
+            state.welcome.save(&new_settings).await?;
             bot.send_message(chat_id, "❌ Welcome message dinonaktifkan!")
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         }
         "preview" => {
             // Show preview of welcome message
-            send_welcome_preview(&bot, chat_id, &settings.welcome, &msg).await?;
+            send_welcome_preview(&bot, chat_id, &settings, &msg).await?;
         }
         _ => {
             bot.send_message(
@@ -125,8 +125,7 @@ pub async fn setwelcome_command(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
+    let mut settings = state.welcome.get_or_create(chat_id.0).await?;
 
     // Check if replying to a message
     let replied = msg.reply_to_message();
@@ -141,25 +140,25 @@ pub async fn setwelcome_command(
         let (message_text, media_file_id, media_type) = extract_message_content(reply);
 
         if let Some(text) = message_text.or_else(|| args_text.map(String::from)) {
-            settings.welcome.message = Some(text);
+            settings.message = Some(text);
         }
 
         if let Some(file_id) = media_file_id {
-            settings.welcome.media_file_id = Some(file_id);
-            settings.welcome.media_type = media_type;
+            settings.media_file_id = Some(file_id);
+            settings.media_type = media_type;
         }
 
-        repo.save(&settings).await?;
+        state.welcome.save(&settings).await?;
         bot.send_message(chat_id, "✅ Welcome message berhasil diatur!")
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         info!("Welcome message set in chat {}", chat_id);
     } else if let Some(text) = args_text {
         // Direct text after command
-        settings.welcome.message = Some(text.to_string());
-        settings.welcome.media_file_id = None;
-        settings.welcome.media_type = None;
-        repo.save(&settings).await?;
+        settings.message = Some(text.to_string());
+        settings.media_file_id = None;
+        settings.media_type = None;
+        state.welcome.save(&settings).await?;
         bot.send_message(chat_id, "✅ Welcome message berhasil diatur!")
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
@@ -204,8 +203,8 @@ pub async fn setwelcomebuttons_command(
         .unwrap_or(false)
     {
         bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Ubah Info Grup'.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -214,13 +213,13 @@ pub async fn setwelcomebuttons_command(
         .split_once(char::is_whitespace)
         .map(|(_, rest)| rest.trim())
         .unwrap_or("");
+    
+    let mut settings = state.welcome.get_or_create(chat_id.0).await?;
 
     if args.is_empty() || args == "clear" {
         // Clear buttons
-        let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-        let mut settings = repo.get_or_create(chat_id.0).await?;
-        settings.welcome.buttons.clear();
-        repo.save(&settings).await?;
+        settings.buttons.clear();
+        state.welcome.save(&settings).await?;
 
         if args == "clear" {
             bot.send_message(chat_id, "✅ Tombol welcome dihapus!")
@@ -255,10 +254,8 @@ pub async fn setwelcomebuttons_command(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
-    settings.welcome.buttons = buttons;
-    repo.save(&settings).await?;
+    settings.buttons = buttons;
+    state.welcome.save(&settings).await?;
 
     bot.send_message(chat_id, "✅ Tombol welcome berhasil diatur!")
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -291,10 +288,9 @@ pub async fn resetwelcome_command(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
-    settings.welcome = WelcomeConfig::default();
-    repo.save(&settings).await?;
+    let mut _settings = state.welcome.get_or_create(chat_id.0).await?;
+    _settings = WelcomeSettings::new(chat_id.0); // Reset to default
+    state.welcome.save(&_settings).await?;
 
     bot.send_message(chat_id, "✅ Welcome message direset ke default!")
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -427,21 +423,21 @@ fn try_parse_welcome_button(chars: &[char], start: usize) -> Option<(InlineButto
 }
 
 /// Format welcome status for display.
-fn format_welcome_status(config: &WelcomeConfig) -> String {
-    let status = if config.enabled { "✅ Aktif" } else { "❌ Nonaktif" };
-    let message = config
+fn format_welcome_status(settings: &WelcomeSettings) -> String {
+    let status = if settings.enabled { "✅ Aktif" } else { "❌ Nonaktif" };
+    let message = settings
         .message
         .as_deref()
         .unwrap_or("<i>Tidak ada</i>");
-    let media = if config.media_file_id.is_some() {
-        format!("✅ {} terlampir", config.media_type.as_deref().unwrap_or("Media"))
+    let media = if settings.media_file_id.is_some() {
+        format!("✅ {} terlampir", settings.media_type.as_deref().unwrap_or("Media"))
     } else {
         "❌ Tidak ada".to_string()
     };
-    let buttons = if config.buttons.is_empty() {
+    let buttons = if settings.buttons.is_empty() {
         "❌ Tidak ada".to_string()
     } else {
-        let count: usize = config.buttons.iter().map(|r| r.len()).sum();
+        let count: usize = settings.buttons.iter().map(|r| r.len()).sum();
         format!("✅ {} tombol", count)
     };
 
@@ -459,21 +455,21 @@ fn format_welcome_status(config: &WelcomeConfig) -> String {
 async fn send_welcome_preview(
     bot: &ThrottledBot,
     chat_id: ChatId,
-    config: &WelcomeConfig,
+    settings: &WelcomeSettings,
     msg: &Message,
 ) -> anyhow::Result<()> {
     let user = msg.from.as_ref().unwrap();
     let formatted = format_welcome_text(
-        config.message.as_deref().unwrap_or("Selamat datang!"),
+        settings.message.as_deref().unwrap_or("Selamat datang!"),
         user,
         msg.chat.title().unwrap_or("Grup"),
         0, // member count placeholder
     );
 
-    let keyboard = build_welcome_keyboard(&config.buttons);
+    let keyboard = build_welcome_keyboard(&settings.buttons);
 
-    if let Some(ref file_id) = config.media_file_id {
-        match config.media_type.as_deref() {
+    if let Some(ref file_id) = settings.media_file_id {
+        match settings.media_type.as_deref() {
             Some("photo") => {
                 bot.send_photo(chat_id, InputFile::file_id(file_id))
                     .caption(formatted)
