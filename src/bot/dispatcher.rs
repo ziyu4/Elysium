@@ -9,7 +9,10 @@ use teloxide::dispatching::UpdateHandler;
 use teloxide::prelude::*;
 
 use crate::cache::CacheRegistry;
-use crate::database::{Database, UserRepo};
+use crate::database::{
+    Database, UserRepo, FilterRepository, NoteRepository,
+    MessageContextRepository, WelcomeRepository, ByeRepository,
+};
 use crate::events::{self, FloodTracker};
 use crate::permissions::Permissions;
 use crate::plugins;
@@ -18,9 +21,6 @@ use crate::plugins;
 pub type ThrottledBot = Throttle<Bot>;
 
 /// Shared application state.
-///
-/// This state is available to all handlers via dependency injection.
-/// Access it in handlers by adding `state: AppState` as a parameter.
 #[derive(Clone)]
 pub struct AppState {
     /// Database connection.
@@ -34,6 +34,21 @@ pub struct AppState {
 
     /// User repository for tracking and resolving users.
     pub users: Arc<UserRepo>,
+
+    /// Filter repository.
+    pub filters: Arc<FilterRepository>,
+
+    /// Note repository.
+    pub notes: Arc<NoteRepository>,
+    
+    /// Message context repository (antiflood + approved users).
+    pub message_context: Arc<MessageContextRepository>,
+
+    /// Welcome repository.
+    pub welcome: Arc<WelcomeRepository>,
+
+    /// Bye repository.
+    pub bye: Arc<ByeRepository>,
 
     /// Owner user IDs (bypass all restrictions).
     pub owner_ids: Vec<u64>,
@@ -52,37 +67,38 @@ impl AppState {
         bot_username: String,
     ) -> Self {
         // Note: Permissions needs the inner Bot for API calls
-        // The Throttle wrapper handles rate limiting automatically
-        // Pass owner_ids so they can bypass all permission checks
         let permissions = Permissions::with_owners(bot.inner().clone(), cache.clone(), owner_ids.clone());
 
-        // Create user repository
+        // Create repositories
         let users = Arc::new(UserRepo::new(&db, &cache));
+        let filters = Arc::new(FilterRepository::new(&db, &cache));
+        let notes = Arc::new(NoteRepository::new(&db, &cache));
+        let message_context = Arc::new(MessageContextRepository::new(&db, &cache));
+        let welcome = Arc::new(WelcomeRepository::new(&db, &cache));
+        let bye = Arc::new(ByeRepository::new(&db, &cache));
 
         Self {
             db,
             cache,
             permissions,
             users,
+            filters,
+            notes,
+            message_context,
+            welcome,
+            bye,
             owner_ids,
             bot_username,
         }
     }
 
-    /// Check if a user is a bot owner (bypasses all restrictions).
+    /// Check if a user is a bot owner.
     pub fn is_owner(&self, user_id: u64) -> bool {
         self.owner_ids.contains(&user_id)
     }
 }
 
 /// Build the dispatcher with all handlers.
-///
-/// This function creates and configures the dispatcher with:
-/// - Command handlers (plugins)
-/// - Event handlers (member updates, antiflood, etc.)
-///
-/// Note: The bot is wrapped with Throttle adaptor for automatic
-/// rate limiting that respects Telegram's API limits.
 pub fn build_dispatcher(
     bot: ThrottledBot,
     db: Arc<Database>,
@@ -100,8 +116,6 @@ pub fn build_dispatcher(
 }
 
 /// Build the handler schema.
-///
-/// The schema defines how updates are routed to handlers.
 fn schema() -> UpdateHandler<anyhow::Error> {
     use teloxide::dispatching::UpdateFilterExt;
 

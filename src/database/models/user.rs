@@ -1,11 +1,11 @@
 //! User data model for caching user information.
 //!
-//! Stores user data from Telegram for username resolution.
+//! Stores user data from Telegram and internal states (AFK).
 
 use serde::{Deserialize, Serialize};
 use teloxide::types::User;
 
-/// Cached user data from Telegram.
+/// Cached user data from Telegram + Internal State.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CachedUser {
     /// Telegram user ID.
@@ -20,6 +20,16 @@ pub struct CachedUser {
     pub last_name: Option<String>,
     /// Unix timestamp of last update.
     pub updated_at: i64,
+
+    // --- Embedded AFK State ---
+    
+    /// AFK Reason (if AFK). None if active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub afk_reason: Option<String>,
+
+    /// Time when user went AFK.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub afk_time: Option<i64>,
 }
 
 impl CachedUser {
@@ -33,10 +43,15 @@ impl CachedUser {
             first_name: user.first_name.clone(),
             last_name: user.last_name.clone(),
             updated_at: now,
+            
+            // Default to Not AFK
+            afk_reason: None,
+            afk_time: None,
         }
     }
 
     /// Check if user data has changed compared to another user.
+    /// Note: Does NOT check AFK status (as that's internal).
     pub fn has_changed(&self, other: &User) -> bool {
         let new_username = other.username.as_ref().map(|u| u.to_lowercase());
         self.username != new_username
@@ -45,7 +60,10 @@ impl CachedUser {
     }
 
     /// Get display name (first name or username).
-    pub fn _display_name(&self) -> &str {
-        &self.first_name
+    pub fn display_name(&self) -> String {
+        self.username_display
+            .as_ref()
+            .map(|u| format!("@{}", u))
+            .unwrap_or_else(|| self.first_name.clone())
     }
 }

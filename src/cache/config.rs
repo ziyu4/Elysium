@@ -36,6 +36,13 @@ impl CacheConfig {
         }
     }
 
+    /// Set max capacity for cache (builder pattern).
+    #[must_use]
+    pub fn max_capacity(mut self, max_capacity: u64) -> Self {
+        self.max_capacity = max_capacity;
+        self
+    }
+
     /// Set time-to-live for cache entries.
     #[must_use]
     pub fn ttl(mut self, duration: Duration) -> Self {
@@ -89,4 +96,35 @@ impl CacheConfig {
             tti: Some(Duration::from_secs(300)),  // 5 minutes idle
         }
     }
+
+    /// Create config for per-message hot path.
+    /// High capacity, medium TTL for things checked every message.
+    pub fn message_context() -> Self {
+        Self {
+            max_capacity: 10_000,
+            ttl: Some(Duration::from_secs(600)), // 10 minutes
+            tti: None,
+        }
+    }
+
+    /// Create config for lazy-loaded rare features.
+    /// Low capacity, short TTL for infrequently accessed data.
+    pub fn lazy_load() -> Self {
+        Self {
+            max_capacity: 2_000,
+            ttl: Some(Duration::from_secs(300)), // 5 minutes
+            tti: None,
+        }
+    }
+
+    /// Create config for hot-promoted content.
+    /// Short TTL with idle timeout for frequently hit items.
+    pub fn hot_promoted() -> Self {
+        Self {
+            max_capacity: 5_000,
+            ttl: Some(Duration::from_secs(120)), // 2 minutes max
+            tti: Some(Duration::from_secs(60)),  // 1 minute idle
+        }
+    }
 }
+

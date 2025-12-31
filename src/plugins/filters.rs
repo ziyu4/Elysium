@@ -7,7 +7,7 @@ use teloxide::types::{ParseMode, ReplyParameters, UserId};
 use tracing::info;
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
-use crate::database::{Filter, GroupSettingsRepo, MatchType};
+use crate::database::{DbFilter, MatchType};
 use crate::utils::{html_escape, parse_content};
 
 /// Handle /filter command - add a new filter.
@@ -110,22 +110,24 @@ pub async fn filter_command(
     // Parse content for tags and buttons
     let parsed = parse_content(&final_reply);
 
-    // Create filter
-    let mut filter = Filter::new(clean_trigger.clone(), parsed.text.clone());
-    filter.match_type = match_type;
-    filter.buttons = parsed.buttons;
-    filter.media_file_id = media_file_id;
-    filter.media_type = media_type;
-    filter.admin_only = parsed.tags.admin_only;
-    filter.user_only = parsed.tags.user_only;
-    filter.protect = parsed.tags.protect;
-    filter.replytag = parsed.tags.replytag;
+    // Create filter using DbFilter
+    let filter = DbFilter {
+        id: None,
+        chat_id: chat_id.0,
+        trigger: clean_trigger.to_lowercase(),
+        match_type,
+        reply: parsed.text.clone(),
+        buttons: parsed.buttons,
+        media_file_id,
+        media_type,
+        admin_only: parsed.tags.admin_only,
+        user_only: parsed.tags.user_only,
+        protect: parsed.tags.protect,
+        replytag: parsed.tags.replytag,
+    };
 
-    // Save filter
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
-    settings.filters.add_filter(filter);
-    repo.save(&settings).await?;
+    // Save filter using FilterRepository
+    state.filters.save_filter(&filter).await?;
 
     info!("Added filter '{}' in chat {}", clean_trigger, chat_id);
 
@@ -156,10 +158,10 @@ pub async fn filters_command(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let settings = repo.get_or_create(chat_id.0).await?;
+    // Get triggers from FilterRepository (L1 cache)
+    let triggers = state.filters.get_triggers(chat_id.0).await?;
 
-    if settings.filters.filters.is_empty() {
+    if triggers.is_empty() {
         bot.send_message(chat_id, "📭 Tidak ada filter di grup ini.\n\nGunakan <code>/filter trigger reply</code> untuk menambahkan.")
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
@@ -167,14 +169,9 @@ pub async fn filters_command(
         return Ok(());
     }
 
-    let mut text = format!("<b>📋 Filter di grup ini ({}):</b>\n\n", settings.filters.filters.len());
-    for filter in &settings.filters.filters {
-        let prefix = match filter.match_type {
-            MatchType::Exact => "exact:",
-            MatchType::Prefix => "prefix:",
-            MatchType::Keyword => "",
-        };
-        text.push_str(&format!("• <code>{}{}</code>\n", prefix, html_escape(&filter.trigger)));
+    let mut text = format!("<b>📋 Filter di grup ini ({}):</b>\n\n", triggers.len());
+    for trigger in triggers {
+        text.push_str(&format!("• <code>{}</code>\n", html_escape(&trigger)));
     }
     text.push_str("\nGunakan <code>/stop trigger</code> untuk menghapus filter.");
 
@@ -224,11 +221,8 @@ pub async fn stop_command(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
-
-    if settings.filters.remove_filter(trigger) {
-        repo.save(&settings).await?;
+    // Delete filter using FilterRepository
+    if state.filters.delete_filter(chat_id.0, trigger).await? {
         info!("Removed filter '{}' from chat {}", trigger, chat_id);
 
         bot.send_message(
@@ -268,7 +262,7 @@ pub async fn stopall_command(
         return Ok(());
     }
 
-    // Check permission: must be owner or can_change_info
+    // Check permission: must be owner
     if !state.permissions.is_owner(chat_id, user_id).await.unwrap_or(false) {
         bot.send_message(chat_id, "❌ Hanya owner grup yang bisa menghapus semua filter.")
             .reply_parameters(ReplyParameters::new(msg.id))
@@ -276,11 +270,14 @@ pub async fn stopall_command(
         return Ok(());
     }
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
+    // Get current trigger count
+    let triggers = state.filters.get_triggers(chat_id.0).await?;
+    let count = triggers.len();
 
-    let count = settings.filters.clear_all();
-    repo.save(&settings).await?;
+    // Delete all filters one by one
+    for trigger in triggers {
+        let _ = state.filters.delete_filter(chat_id.0, &trigger).await;
+    }
 
     info!("Cleared all {} filters from chat {}", count, chat_id);
 

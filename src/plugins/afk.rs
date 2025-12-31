@@ -1,6 +1,7 @@
 //! AFK command handlers.
 //!
 //! Commands for setting and managing AFK status.
+//! Optimized to use CachedUser for zero-latency checks.
 
 use teloxide::prelude::*;
 use teloxide::types::{
@@ -9,8 +10,6 @@ use teloxide::types::{
 use tracing::info;
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
-use crate::database::AfkStatus;
-use crate::database::GroupSettingsRepo;
 use crate::utils::{format_duration_full, html_escape};
 
 /// Handle /afk command - set AFK status.
@@ -35,16 +34,8 @@ pub async fn afk_command(
         .map(|(_, rest)| rest.trim().to_string())
         .filter(|s| !s.is_empty());
 
-    // Save AFK status with username for mention detection
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
-    settings.afk.set_afk(
-        user_id,
-        reason.clone(),
-        user.first_name.clone(),
-        user.username.clone(),
-    );
-    repo.save(&settings).await?;
+    // Save AFK status (Updates Cache & DB)
+    state.users.set_afk(user_id, reason.clone()).await?;
 
     info!("User {} went AFK in chat {}", user_id, chat_id);
 
@@ -95,20 +86,18 @@ pub async fn afk_handler(
     };
     let user_id = user.id.0;
 
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let mut settings = repo.get_or_create(chat_id.0).await?;
+    // 1. Check if current user is AFK (Auto-Remove)
+    // We check cache first
+    let current_user_data = state.users.get_by_id(user_id).await?;
+    if let Some(data) = current_user_data {
+        if let Some(reason) = &data.afk_reason {
+            // User is AFK, remove it
+            let duration_secs = data.afk_time.map(|t| chrono::Utc::now().timestamp() - t).unwrap_or(0) as u64;
+            let duration = format_duration_full(duration_secs);
+            
+            state.users.remove_afk(user_id).await?;
 
-    // Check if current user is AFK - if so, welcome them back
-    if settings.afk.is_afk(user_id)
-        && let Some(afk_status) = settings.afk.remove_afk(user_id) {
-            repo.save(&settings).await?;
-
-            let duration = format_duration_full(afk_status.duration_secs());
-            let reason_text = afk_status
-                .reason
-                .as_ref()
-                .map(|r| format!("\nAlasan: {}", html_escape(r)))
-                .unwrap_or_default();
+            let reason_text = format!("\nAlasan: {}", html_escape(reason));
 
             bot.send_message(
                 chat_id,
@@ -125,51 +114,54 @@ pub async fn afk_handler(
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         }
+    }
 
     // Track which user IDs we've already notified about (to avoid duplicates)
     let mut notified_users: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
-    // Check if replying to an AFK user
+    // 2. Check Reply to AFK User
     if let Some(reply) = msg.reply_to_message()
         && let Some(reply_user) = &reply.from {
             let reply_user_id = reply_user.id.0;
-            if let Some(afk_status) = settings.afk.get_afk(reply_user_id)
-                && !notified_users.contains(&reply_user_id) {
-                    send_afk_notification(&bot, chat_id, msg.id, reply_user_id, afk_status).await?;
+            // Fetch replied user data
+            if let Ok(Some(target)) = state.users.get_by_id(reply_user_id).await {
+                if target.afk_reason.is_some() && !notified_users.contains(&reply_user_id) {
+                    send_afk_notification(&bot, chat_id, msg.id, &target).await?;
                     notified_users.insert(reply_user_id);
                 }
+            }
         }
 
-    // Check mentions in message text
+    // 3. Check Mentions in message text
     let msg_text = msg.text().unwrap_or("");
     
     if let Some(entities) = msg.entities() {
         for entity in entities {
             match &entity.kind {
-                // TextMention - when user is mentioned by clicking their name
+                // TextMention (Clickable Name)
                 MessageEntityKind::TextMention { user: mentioned_user } => {
                     let mentioned_user_id = mentioned_user.id.0;
-                    if let Some(afk_status) = settings.afk.get_afk(mentioned_user_id)
-                        && !notified_users.contains(&mentioned_user_id) {
-                            send_afk_notification(&bot, chat_id, msg.id, mentioned_user_id, afk_status).await?;
+                    if let Ok(Some(target)) = state.users.get_by_id(mentioned_user_id).await {
+                        if target.afk_reason.is_some() && !notified_users.contains(&mentioned_user_id) {
+                            send_afk_notification(&bot, chat_id, msg.id, &target).await?;
                             notified_users.insert(mentioned_user_id);
                         }
+                    }
                 },
-                // Mention - @username style mention
+                // @username Mention
                 MessageEntityKind::Mention => {
-                    // Extract the username from the message text
                     let start = entity.offset;
                     let end = start + entity.length;
                     if let Some(mention_text) = msg_text.get(start..end) {
-                        // Remove the @ prefix
                         let username = mention_text.trim_start_matches('@');
                         
-                        // Look up if this username belongs to an AFK user
-                        if let Some((afk_user_id, afk_status)) = settings.afk.get_afk_by_username(username)
-                            && !notified_users.contains(&afk_user_id) {
-                                send_afk_notification(&bot, chat_id, msg.id, afk_user_id, afk_status).await?;
-                                notified_users.insert(afk_user_id);
+                        // Resolve username -> UserData (Includes AFK status!)
+                        if let Ok(Some(target)) = state.users.get_by_username(username).await {
+                             if target.afk_reason.is_some() && !notified_users.contains(&target.user_id) {
+                                send_afk_notification(&bot, chat_id, msg.id, &target).await?;
+                                notified_users.insert(target.user_id);
                             }
+                        }
                     }
                 },
                 _ => {}
@@ -184,12 +176,12 @@ async fn send_afk_notification(
     bot: &ThrottledBot,
     chat_id: teloxide::types::ChatId,
     reply_to_msg_id: MessageId,
-    user_id: u64,
-    afk_status: &AfkStatus,
+    user: &crate::database::CachedUser,
 ) -> anyhow::Result<()> {
-    let duration = format_duration_full(afk_status.duration_secs());
-    let reason_text = afk_status
-        .reason
+    let duration_secs = user.afk_time.map(|t| chrono::Utc::now().timestamp() - t).unwrap_or(0) as u64;
+    let duration = format_duration_full(duration_secs);
+    
+    let reason_text = user.afk_reason
         .as_ref()
         .map(|r| format!("\nAlasan: {}", html_escape(r)))
         .unwrap_or_default();
@@ -198,8 +190,8 @@ async fn send_afk_notification(
         chat_id,
         format!(
             "<a href=\"tg://user?id={}\">{}</a> sedang afk.{}\nSejak: {} yang lalu.",
-            user_id,
-            html_escape(&afk_status.first_name),
+            user.user_id,
+            html_escape(&user.first_name),
             reason_text,
             duration
         ),

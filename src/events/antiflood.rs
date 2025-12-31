@@ -12,7 +12,7 @@ use teloxide::types::{ChatPermissions, ParseMode};
 use tracing::{debug, info, warn};
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
-use crate::database::{FloodPenalty, GroupSettingsRepo};
+use crate::database::FloodPenalty;
 use crate::utils::{html_escape, format_duration_full};
 
 /// User's flood tracking data
@@ -176,12 +176,11 @@ async fn antiflood_check_impl(
 
     let user_id = user.id;
 
-    // Get group settings
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let settings = repo.get_or_create(chat_id.0).await?;
+    // Get message context (lightweight, cached)
+    let ctx = state.message_context.get_or_default(chat_id.0).await?;
 
     // Check if antiflood is enabled
-    if !settings.antiflood.enabled {
+    if !ctx.antiflood.enabled {
         return Ok(());
     }
 
@@ -191,8 +190,8 @@ async fn antiflood_check_impl(
         return Ok(());
     }
 
-    // Check if user is approved (bypass antiflood)
-    if settings.is_approved(user_id.0) {
+    // Check if user is approved (bypass antiflood) - O(n) but small list
+    if ctx.is_approved(user_id.0) {
         debug!("User {} is approved, bypassing antiflood", user_id);
         return Ok(());
     }
@@ -202,12 +201,11 @@ async fn antiflood_check_impl(
         return Ok(());
     }
 
-    // Record message and check for flooding
     let (is_flooding, warnings) = flood_tracker.record_message(
         chat_id.0,
         user_id.0,
-        settings.antiflood.max_messages,
-        settings.antiflood.time_window_secs,
+        ctx.antiflood.max_messages,
+        ctx.antiflood.time_window_secs,
     );
 
     if !is_flooding {
@@ -220,9 +218,9 @@ async fn antiflood_check_impl(
     );
 
     // Check if we should apply penalty or just warn
-    if warnings <= settings.antiflood.warnings_before_penalty {
+    if warnings <= ctx.antiflood.warnings_before_penalty {
         // Send warning
-        let remaining = settings.antiflood.warnings_before_penalty - warnings + 1;
+        let remaining = ctx.antiflood.warnings_before_penalty - warnings + 1;
         let warning_msg = format!(
             "❌ Ya, saya tidak suka banjir pesan yang kamu lakukan!\n\n\
             <a href=\"tg://user?id={}\">{}</a>, harap jaga ritme pesanmu. ({} peringatan tersisa)",
@@ -236,13 +234,12 @@ async fn antiflood_check_impl(
         return Ok(());
     }
 
-    // Apply penalty
     info!(
         "Applying flood penalty {:?} to user {} in chat {}",
-        settings.antiflood.penalty, user_id, chat_id
+        ctx.antiflood.penalty, user_id, chat_id
     );
 
-    match settings.antiflood.penalty {
+    match ctx.antiflood.penalty {
         FloodPenalty::Warn => {
             bot.send_message(
                 chat_id,
@@ -258,9 +255,9 @@ async fn antiflood_check_impl(
             .await?;
         }
         FloodPenalty::Mute => {
-            let until = if settings.antiflood.penalty_duration_secs > 0 {
+            let until = if ctx.antiflood.penalty_duration_secs > 0 {
                 chrono::Utc::now()
-                    + chrono::Duration::seconds(settings.antiflood.penalty_duration_secs as i64)
+                    + chrono::Duration::seconds(ctx.antiflood.penalty_duration_secs as i64)
             } else {
                 // Permanent mute (use a far future date)
                 chrono::Utc::now() + chrono::Duration::days(366)
@@ -274,7 +271,7 @@ async fn antiflood_check_impl(
                 .await
             {
                 Ok(_) => {
-                    let duration_str = format!("selama {}", format_duration_full(settings.antiflood.penalty_duration_secs));
+                    let duration_str = format!("selama {}", format_duration_full(ctx.antiflood.penalty_duration_secs));
                     bot.send_message(
                         chat_id,
                         format!(
@@ -319,7 +316,7 @@ async fn antiflood_check_impl(
         }
         FloodPenalty::TempBan => {
             let until = chrono::Utc::now()
-                + chrono::Duration::seconds(settings.antiflood.penalty_duration_secs as i64);
+                + chrono::Duration::seconds(ctx.antiflood.penalty_duration_secs as i64);
 
             match bot
                 .ban_chat_member(chat_id, user_id)
@@ -327,7 +324,7 @@ async fn antiflood_check_impl(
                 .await
             {
                 Ok(_) => {
-                    let duration_str = format!("selama {}", format_duration_full(settings.antiflood.penalty_duration_secs));
+                    let duration_str = format!("selama {}", format_duration_full(ctx.antiflood.penalty_duration_secs));
                     bot.send_message(
                         chat_id,
                         format!(

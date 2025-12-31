@@ -10,6 +10,7 @@ use tracing::info;
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
 use crate::database::{GroupSettingsRepo, InlineButton, WelcomeConfig};
+use crate::utils::html_escape;
 
 /// Handle /welcome command - show or toggle welcome.
 pub async fn welcome_command(
@@ -555,11 +556,4 @@ pub fn build_welcome_keyboard(buttons: &[Vec<InlineButton>]) -> InlineKeyboardMa
         .collect();
 
     InlineKeyboardMarkup::new(keyboard)
-}
-
-/// Escape HTML special characters.
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }

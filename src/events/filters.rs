@@ -1,6 +1,7 @@
 //! Filter event handler.
 //!
 //! Handles incoming messages and checks for filter triggers.
+//! Optimized for decentralized architecture (L1/L2 Caching).
 
 use teloxide::prelude::*;
 use teloxide::types::{
@@ -10,7 +11,7 @@ use teloxide::types::{
 use tracing::debug;
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
-use crate::database::{Filter, GroupSettingsRepo};
+use crate::database::models::DbFilter;
 use crate::utils::apply_fillings_new;
 
 /// Public function to check filters - called from unified handler.
@@ -52,56 +53,72 @@ async fn filter_check_impl(
 
     debug!("Filter handler processing message: '{}' in chat {}", text, chat_id);
 
-    // Get filters for this chat
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let settings = repo.get_or_create(chat_id.0).await?;
+    // L1 Cache: Get list of triggers (Strings only)
+    let triggers = state.filters.get_triggers(chat_id.0).await?;
 
-    debug!("Found {} filters in chat {}", settings.filters.filters.len(), chat_id);
-
-    if settings.filters.filters.is_empty() {
+    if triggers.is_empty() {
         return Ok(());
     }
 
-    // Find matching filters
-    let matching_filters = settings.filters.find_matching(text);
+    // Find first matching trigger
+    // We check against the keys in memory (Fast!)
+    let mut matched_trigger = None;
+    let text_lower = text.to_lowercase();
 
-    debug!("Found {} matching filters for '{}'", matching_filters.len(), text);
+    for trigger in triggers {
+        // Simple logic first: Checks containment. 
+        // Note: Real DBFilter has MatchType (Exact, Prefix, etc).
+        // Since L1 only stores the trigger string, we might over-fetch slightly if the 
+        // trigger is "cat" and message is "category", but then L2 checks MatchType.
+        // For standard "Keyword" matching which is default, this is correct.
+        if text_lower.contains(&trigger) {
+            matched_trigger = Some(trigger);
+            break;
+        }
+    }
 
-    if matching_filters.is_empty() {
+    let trigger = match matched_trigger {
+        Some(t) => t,
+        None => return Ok(()),
+    };
+    
+    debug!("L1 Filter Match: '{}' in chat {}", trigger, chat_id);
+
+    // L2 Cache: Fetch the actual filter content match
+    let filter = match state.filters.get_filter(chat_id.0, &trigger).await? {
+        Some(f) => f,
+        None => return Ok(()), // Should not happen if L1 and DB are synced
+    };
+
+    // Verify MatchType (Double Check)
+    if !filter.matches(text) {
         return Ok(());
     }
 
-    // Check user permissions for permission-based filters
+    // Check user permissions
     let is_admin = state.permissions.is_admin(chat_id, user.id).await.unwrap_or(false);
 
-    for filter in matching_filters {
-        // Check permission tags
-        if filter.admin_only && !is_admin {
-            continue;
-        }
-        if filter.user_only && is_admin {
-            continue;
-        }
-
-        debug!("Filter '{}' triggered in chat {}", filter.trigger, chat_id);
-
-        // Determine reply target
-        let reply_to = if filter.replytag {
-            // Reply to the user that was replied to
-            msg.reply_to_message()
-                .and_then(|m| m.from.as_ref())
-                .map(|_| msg.reply_to_message().unwrap().id)
-                .unwrap_or(msg.id)
-        } else {
-            msg.id
-        };
-
-        // Send filter response
-        send_filter_response(bot, state, chat_id, user, filter, reply_to).await?;
-
-        // Only respond to first matching filter
-        break;
+    if filter.admin_only && !is_admin {
+        return Ok(());
     }
+    if filter.user_only && is_admin {
+        return Ok(());
+    }
+
+    debug!("Executing Filter '{}'", filter.trigger);
+
+    // Determine reply target
+    let reply_to = if filter.replytag {
+        msg.reply_to_message()
+            .and_then(|m| m.from.as_ref())
+            .map(|_| msg.reply_to_message().unwrap().id)
+            .unwrap_or(msg.id)
+    } else {
+        msg.id
+    };
+
+    // Send filter response
+    send_filter_response(bot, state, chat_id, user, &filter, reply_to).await?;
 
     Ok(())
 }
@@ -112,15 +129,15 @@ async fn send_filter_response(
     _state: &AppState,
     chat_id: ChatId,
     user: &teloxide::types::User,
-    filter: &Filter,
+    filter: &DbFilter,
     reply_to: MessageId,
 ) -> anyhow::Result<()> {
-    let chat_name = "Grup"; // Could fetch from chat
+    let chat_name = "Grup"; 
 
     // Apply fillings
     let text = apply_fillings_new(&filter.reply, user, chat_name, None);
 
-    // Build keyboard if buttons exist
+    // Build keyboard
     let keyboard = if !filter.buttons.is_empty() {
         let rows: Vec<Vec<InlineKeyboardButton>> = filter
             .buttons

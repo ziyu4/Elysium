@@ -10,6 +10,7 @@ use teloxide::types::User;
 use crate::database::{InlineButton, NoteTags};
 
 /// Result of parsing note content.
+
 #[derive(Debug, Clone)]
 pub struct ParsedNote {
     /// Clean text without buttons and tags
@@ -191,7 +192,7 @@ pub fn parse_tags(input: &str) -> (String, NoteTags) {
 /// - `{mention}` - Mention with name
 /// - `{id}` - User ID
 /// - `{chatname}` - Chat name
-pub fn apply_fillings(text: &str, user: &User, chat_name: &str, _bot_username: &str) -> String {
+pub fn _apply_fillings(text: &str, user: &User, chat_name: &str, _bot_username: &str) -> String {
     let first = &user.first_name;
     let last = user.last_name.as_deref().unwrap_or("");
     let fullname = if last.is_empty() {
@@ -221,7 +222,7 @@ pub fn apply_fillings(text: &str, user: &User, chat_name: &str, _bot_username: &
 
 /// Apply {rules} and {rules:same} fillings.
 /// Returns (text, additional rule buttons to add)
-pub fn apply_rules_filling(
+pub fn _apply_rules_filling(
     text: &str,
     chat_id: i64,
     bot_username: &str,

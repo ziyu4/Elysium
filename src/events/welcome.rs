@@ -8,7 +8,6 @@ use teloxide::types::{ChatMemberUpdated, InputFile, ParseMode};
 use tracing::{debug, info};
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
-use crate::database::GroupSettingsRepo;
 use crate::plugins::welcome::{build_welcome_keyboard, format_welcome_text};
 
 /// Returns the handler for new member events.
@@ -40,19 +39,23 @@ async fn welcome_handler(
 
     debug!("New member {} joined chat {}", user.id, chat.id);
 
-    // Get group settings
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let settings = repo.get_or_create(chat.id.0).await?;
+    // Get welcome settings (lazy loaded, 5min TTL)
+    let settings = match state.welcome.get(chat.id.0).await? {
+        Some(s) => s,
+        None => {
+            debug!("No welcome settings for chat {}", chat.id);
+            return Ok(());
+        }
+    };
 
     // Check if welcome is enabled
-    if !settings.welcome.enabled {
+    if !settings.enabled {
         debug!("Welcome disabled for chat {}", chat.id);
         return Ok(());
     }
 
     // Get welcome message text
     let template = settings
-        .welcome
         .message
         .as_deref()
         .unwrap_or("👋 Selamat datang, {mention}!");
@@ -69,11 +72,11 @@ async fn welcome_handler(
     let formatted_text = format_welcome_text(template, user, chat_title, member_count);
 
     // Build keyboard if buttons are configured
-    let keyboard = build_welcome_keyboard(&settings.welcome.buttons);
+    let keyboard = build_welcome_keyboard(&settings.buttons);
 
     // Send welcome message (with or without media)
-    if let Some(ref file_id) = settings.welcome.media_file_id {
-        match settings.welcome.media_type.as_deref() {
+    if let Some(ref file_id) = settings.media_file_id {
+        match settings.media_type.as_deref() {
             Some("photo") => {
                 bot.send_photo(chat.id, InputFile::file_id(file_id))
                     .caption(formatted_text)
@@ -129,3 +132,4 @@ async fn welcome_handler(
 
     Ok(())
 }
+

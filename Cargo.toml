@@ -47,6 +47,7 @@ chrono = { version = "0.4", features = ["serde"] }
 # Caching
 moka = { version = "0.12", features = ["sync"] }
 dashmap = "6"
+futures = "0.3"
 
 # Webhook
 axum = "0.7"

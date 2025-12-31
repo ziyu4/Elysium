@@ -1,11 +1,23 @@
 //! Database module exports.
 
-mod models;
+pub mod models;
 mod mongo;
-mod repository;
+pub mod repository;
 mod users;
 
 pub use models::*;
 pub use mongo::Database;
-pub use repository::GroupSettingsRepo;
+pub use repository::{
+    FilterRepository,
+    NoteRepository,
+    MessageContextRepository,
+    WelcomeRepository,
+    ByeRepository,
+    RulesRepository,
+    WarnsRepository,
+    GroupSettingsRepo,
+};
 pub use users::UserRepo;
+
+// Re-export for backwards compatibility
+pub use models::db_filter::{DbFilter, MatchType};

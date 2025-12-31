@@ -556,6 +556,7 @@ dependencies = [
  "chrono",
  "dashmap",
  "dotenvy",
+ "futures",
  "moka",
  "mongodb",
  "once_cell",

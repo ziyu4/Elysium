@@ -2,15 +2,11 @@
 //!
 //! Collection of helper functions used across the bot.
 
-pub mod note_parser;
 pub mod parser;
-pub mod reply;
 
-pub use note_parser::{apply_fillings, apply_rules_filling, parse_note_content, ParsedNote};
 pub use parser::{
     parse_content, apply_fillings as apply_fillings_new, html_escape, format_duration_full, parse_duration,
 };
-pub use reply::ReplyExt;
 
 /// Format a username for display.
 ///
@@ -40,5 +36,3 @@ pub fn escape_markdown(text: &str) -> String {
     }
     result
 }
-
-

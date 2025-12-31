@@ -8,7 +8,6 @@ use teloxide::types::{ChatMemberUpdated, InputFile, ParseMode};
 use tracing::{debug, info};
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
-use crate::database::GroupSettingsRepo;
 use crate::plugins::bye::{build_bye_keyboard, format_bye_text};
 
 /// Returns the handler for member leave events.
@@ -40,19 +39,23 @@ async fn bye_handler(
 
     debug!("Member {} left chat {}", user.id, chat.id);
 
-    // Get group settings
-    let repo = GroupSettingsRepo::new(&state.db, &state.cache);
-    let settings = repo.get_or_create(chat.id.0).await?;
+    // Get bye settings (lazy loaded, 5min TTL)
+    let settings = match state.bye.get(chat.id.0).await? {
+        Some(s) => s,
+        None => {
+            debug!("No bye settings for chat {}", chat.id);
+            return Ok(());
+        }
+    };
 
     // Check if goodbye is enabled
-    if !settings.bye.enabled {
+    if !settings.enabled {
         debug!("Goodbye disabled for chat {}", chat.id);
         return Ok(());
     }
 
     // Get goodbye message text
     let template = settings
-        .bye
         .message
         .as_deref()
         .unwrap_or("👋 Selamat tinggal, {mention}!");
@@ -63,11 +66,11 @@ async fn bye_handler(
     let formatted_text = format_bye_text(template, user, chat_title);
 
     // Build keyboard if buttons are configured
-    let keyboard = build_bye_keyboard(&settings.bye.buttons);
+    let keyboard = build_bye_keyboard(&settings.buttons);
 
     // Send goodbye message (with or without media)
-    if let Some(ref file_id) = settings.bye.media_file_id {
-        match settings.bye.media_type.as_deref() {
+    if let Some(ref file_id) = settings.media_file_id {
+        match settings.media_type.as_deref() {
             Some("photo") => {
                 bot.send_photo(chat.id, InputFile::file_id(file_id))
                     .caption(formatted_text)
