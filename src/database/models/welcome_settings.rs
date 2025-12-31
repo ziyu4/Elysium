@@ -41,7 +41,7 @@ pub struct WelcomeSettings {
 }
 
 fn default_enabled() -> bool {
-    true
+    false
 }
 
 impl Default for WelcomeSettings {
