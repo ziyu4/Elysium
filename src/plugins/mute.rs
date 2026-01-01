@@ -7,7 +7,7 @@ use teloxide::types::{ChatPermissions, ParseMode, ReplyParameters, UserId};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
-use crate::utils::{html_escape, parse_duration};
+use crate::utils::{html_escape, parse_duration, get_target_from_msg};
 use crate::i18n::get_text;
 
 /// Handle /mute command - now supports optional duration.
@@ -73,29 +73,9 @@ async fn mute_action(
         return Ok(());
     }
 
-    // Extract target
-    let text = msg.text().unwrap_or("");
-    let parts: Vec<&str> = text.split_whitespace().skip(1).collect();
-
-    // Determine target - now also capture first_name
-    let (target_id, target_name, reason_start_idx) = if let Some(reply) = msg.reply_to_message() {
-        if let Some(user) = &reply.from {
-            (Some(user.id), user.first_name.clone(), 0)
-        } else {
-            (None, String::new(), 0)
-        }
-    } else if !parts.is_empty() {
-        if let Ok(id) = parts[0].parse::<u64>() {
-            (Some(UserId(id)), format!("User {}", id), 1)
-        } else {
-            (None, String::new(), 0)
-        }
-    } else {
-        (None, String::new(), 0)
-    };
-
-    let target_id = match target_id {
-        Some(id) => id,
+    // Use shared target resolver
+    let (target_id, target_name, skip_words) = match get_target_from_msg(&bot, &msg, &state).await {
+        Some(t) => t,
         None => {
             bot.send_message(chat_id, get_text(&locale, "mute.error_user_not_found"))
                 .reply_parameters(ReplyParameters::new(msg.id))
@@ -103,6 +83,11 @@ async fn mute_action(
             return Ok(());
         }
     };
+
+    // Parse remaining args
+    let text = msg.text().unwrap_or("");
+    let parts: Vec<&str> = text.split_whitespace().skip(1).collect();
+    let reason_start_idx = skip_words;
 
     // Anti-Admin
     if mode != MuteMode::Unmute

@@ -167,7 +167,11 @@ pub async fn filters_command(
         return Ok(());
     }
 
+    // Get group name
+    let group_name = msg.chat.title().unwrap_or("Grup");
+
     let mut text = get_text(&locale, "filters.list_header")
+        .replace("{title}", &html_escape(group_name))
         .replace("{count}", &triggers.len().to_string());
 
     for trigger in triggers {

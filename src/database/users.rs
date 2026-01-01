@@ -19,6 +19,7 @@ pub struct UserRepo {
     collection: Collection<CachedUser>,
     cache_by_id: TypedCache<u64, CachedUser>,
     cache_by_username: TypedCache<String, u64>, // username (lowercase) -> user_id
+    debounce_cache: TypedCache<u64, ()>,         // Skip updates if recently processed
 }
 
 impl UserRepo {
@@ -38,66 +39,91 @@ impl UserRepo {
                 .max_capacity(10_000),
         );
 
+        // Debounce cache - skip updates for users processed in last 30 seconds
+        let debounce_cache = cache.get_or_create(
+            "users_debounce",
+            CacheConfig::default()
+                .ttl(Duration::from_secs(30))
+                .max_capacity(50_000),
+        );
+
         Self {
             collection: db.collection("users"),
             cache_by_id,
             cache_by_username,
+            debounce_cache,
         }
     }
 
     /// Upsert user data (update or insert).
-    /// Preserves existing AFK status if not changing.
+    /// Uses debounce to skip redundant updates within 30 seconds.
+    /// Preserves internal state (AFK, lang) when updating.
     pub async fn upsert(&self, user: &User) -> Result<()> {
         let user_id = user.id.0;
-        let mut cached_user = CachedUser::from_telegram(user);
 
-        // Check if data changed
-        if let Some(existing) = self.cache_by_id.get(&user_id) {
-            // Preserve AFK status from existing cache/db
-            cached_user.afk_reason = existing.afk_reason.clone();
-            cached_user.afk_time = existing.afk_time;
-            // Preserve Lang if not explicitly set (which it isn't from telegram update)
-            cached_user.lang = existing.lang.clone();
+        // DEBOUNCE: Skip if this user was processed recently
+        if self.debounce_cache.contains(&user_id) {
+            return Ok(());
+        }
 
+        // Check cache first
+        if let Some(mut existing) = self.cache_by_id.get(&user_id) {
             if !existing.has_changed(user) {
-                // If core data hasn't changed, we don't need to write to DB
-                // BUT we might need to update Last Seen? Let's skip for efficiency unless TTL is low.
+                // Data unchanged - just mark as debounced and return
+                self.debounce_cache.insert(user_id, ());
                 return Ok(());
             }
+
+            // Data changed - save old username for cache invalidation
+            let old_username = existing.username.clone();
             
-            // Invalidate old username if changed
-            if let Some(old_username) = &existing.username {
-                let new_username = user.username.as_ref().map(|u| u.to_lowercase());
-                if Some(old_username.clone()) != new_username {
-                    self.cache_by_username.invalidate(old_username);
+            // Update with new Telegram data (preserves AFK, lang)
+            existing.update_from_telegram(user);
+
+            // Invalidate old username cache if changed
+            if let Some(old) = &old_username {
+                if existing.username.as_ref() != Some(old) {
+                    self.cache_by_username.invalidate(old);
                 }
             }
-        } else {
-             // If not in cache, try to get from DB to preserve AFK?
-             // Or just assume new/overwrite if not active.
-             // For robustness, usually we merge. But standard upsert is fine for now.
-             // If they were AFK and we rebooted, loading from DB resolves this.
-             if let Ok(Some(db_user)) = self.get_by_id_internal(user_id).await {
-                 cached_user.afk_reason = db_user.afk_reason.clone();
-                 cached_user.afk_time = db_user.afk_time;
-                 cached_user.lang = db_user.lang.clone();
-             }
+
+            // Update caches
+            self.cache_by_id.insert(user_id, existing.clone());
+            if let Some(username) = &existing.username {
+                self.cache_by_username.insert(username.clone(), user_id);
+            }
+            self.debounce_cache.insert(user_id, ());
+
+            return self.persist_to_db(&existing).await;
         }
+
+        // Not in cache - check DB to preserve internal state
+        let cached_user = if let Ok(Some(mut db_user)) = self.get_by_id_internal(user_id).await {
+            db_user.update_from_telegram(user);
+            db_user
+        } else {
+            CachedUser::from_telegram(user)
+        };
 
         // Update caches
         self.cache_by_id.insert(user_id, cached_user.clone());
         if let Some(username) = &cached_user.username {
             self.cache_by_username.insert(username.clone(), user_id);
         }
+        self.debounce_cache.insert(user_id, ());
 
-        // Persist to DB
-        let filter = doc! { "user_id": user_id as i64 };
+        self.persist_to_db(&cached_user).await
+    }
+
+    /// Persist user to database.
+    async fn persist_to_db(&self, user: &CachedUser) -> Result<()> {
+        let filter = doc! { "user_id": user.user_id as i64 };
         let options = mongodb::options::ReplaceOptions::builder()
             .upsert(true)
             .build();
 
         self.collection
-            .replace_one(filter, &cached_user)
+            .replace_one(filter, user)
             .with_options(options)
             .await?;
 
@@ -116,7 +142,7 @@ impl UserRepo {
     /// Set AFK status.
     pub async fn set_afk(&self, user_id: u64, reason: Option<String>) -> Result<()> {
         let now = chrono::Utc::now().timestamp();
-        let reason_val = reason.unwrap_or_else(|| "AFK".to_string());
+        let reason_val = reason.unwrap_or_else(|| "ㅤ".to_string());
 
         // Update DB
         let filter = doc! { "user_id": user_id as i64 };

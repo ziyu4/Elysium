@@ -286,10 +286,19 @@ pub async fn handle_rules_deeplink(
         }
     };
 
-    // This provides robustness against stale titles
-    let group_name = match bot.get_chat(ChatId(group_chat_id)).await {
-        Ok(chat) => chat.title().map(|t| t.to_string()).unwrap_or("Grup".to_string()),
-        Err(_) => "Grup".to_string(),
+    // Try cached group title from MessageContext first, fallback to get_chat
+    let group_name = if let Ok(ctx) = state.message_context.get_or_default(group_chat_id).await {
+        ctx.group_info
+            .as_ref()
+            .map(|g| g.title.clone())
+            .or(ctx.title.clone())
+            .unwrap_or_else(|| "Grup".to_string())
+    } else {
+        // Fallback to get_chat only if not in cache
+        bot.get_chat(ChatId(group_chat_id)).await
+            .ok()
+            .and_then(|c| c.title().map(String::from))
+            .unwrap_or_else(|| "Grup".to_string())
     };
 
     let formatted = get_text(&locale, "rules.title_format")

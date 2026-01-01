@@ -9,8 +9,10 @@ use crate::database::InlineButton;
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum MatchType {
-    /// Match anywhere in message (default)
+    /// Match as whole word (default) - "nak" matches "aku nak" but not "naknak"
     #[default]
+    Word,
+    /// Match anywhere in message (legacy contains)
     Keyword,
     /// Match only if entire message equals trigger
     Exact,
@@ -74,9 +76,18 @@ impl DbFilter {
         let trigger_lower = self.trigger.to_lowercase();
 
         match self.match_type {
+            MatchType::Word => {
+                // Match as whole word - split by whitespace and check each word
+                // Also strip punctuation from word boundaries
+                msg_lower.split_whitespace().any(|word| {
+                    let cleaned = word.trim_matches(|c: char| !c.is_alphanumeric());
+                    cleaned == trigger_lower || word == trigger_lower
+                })
+            }
             MatchType::Keyword => msg_lower.contains(&trigger_lower),
             MatchType::Exact => msg_lower.trim() == trigger_lower,
             MatchType::Prefix => msg_lower.starts_with(&trigger_lower),
         }
     }
 }
+

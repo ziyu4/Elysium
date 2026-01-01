@@ -125,7 +125,7 @@
         "error_empty_reply": "❌ Reply ga boleh kosong. Kasih teks atau reply ke media.",
         "added": "✅ Filter <code>{trigger}</code> berhasil ditambahin!",
         "none": "📭 Ga ada filter di grup ini.\n\nPake <code>/filter trigger reply</code> buat nambahin.",
-        "list_header": "<b>📋 Filter di grup ini ({count}):</b>\n\n",
+        "list_header": "<b>📋 Filter di {title} ({count}):</b>\n\n",
         "list_footer": "\nGunakan <code>/stop trigger</code> buat hapus filter.",
         "stop_usage": "📖 Pake: <code>/stop trigger</code>",
         "deleted": "✅ Filter <code>{trigger}</code> berhasil dihapus!",

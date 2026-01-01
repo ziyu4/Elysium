@@ -61,9 +61,21 @@ impl CachedUser {
     /// Note: Does NOT check AFK status (as that's internal).
     pub fn has_changed(&self, other: &User) -> bool {
         let new_username = other.username.as_ref().map(|u| u.to_lowercase());
+        let new_username_display = other.username.as_ref();
         self.username != new_username
+            || self.username_display.as_ref() != new_username_display
             || self.first_name != other.first_name
             || self.last_name != other.last_name
+    }
+
+    /// Update user data from Telegram User, preserving internal state (AFK, lang).
+    pub fn update_from_telegram(&mut self, user: &User) {
+        self.username = user.username.as_ref().map(|u| u.to_lowercase());
+        self.username_display = user.username.clone();
+        self.first_name = user.first_name.clone();
+        self.last_name = user.last_name.clone();
+        self.updated_at = chrono::Utc::now().timestamp();
+        // afk_reason, afk_time, lang are preserved (not touched)
     }
 
     /// Get display name (first name or username).

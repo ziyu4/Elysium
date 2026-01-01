@@ -15,6 +15,7 @@ pub mod filters;
 pub mod help;
 pub mod mute;
 pub mod notes;
+pub mod ping;
 pub mod pin;
 pub mod purge;
 pub mod rules;
@@ -267,6 +268,9 @@ pub enum Command {
 
     #[command(description = "Set language (en/id)")]
     Setlang,
+
+    #[command(description = "Cek latency API Telegram")]
+    Ping,
 }
 
 /// Build the combined command handler.
@@ -365,6 +369,8 @@ pub fn command_handler() -> UpdateHandler<anyhow::Error> {
         .branch(case![Command::Warntime].endpoint(warn::warntime_command))
         // Settings
         .branch(case![Command::Setlang].endpoint(settings::setlang_command))
+        // Ping
+        .branch(case![Command::Ping].endpoint(ping::ping_command))
 }
 
 /// Build hashtag handler for notes.

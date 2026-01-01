@@ -66,12 +66,13 @@ async fn filter_check_impl(
     let text_lower = text.to_lowercase();
 
     for trigger in triggers {
-        // Simple logic first: Checks containment. 
-        // Note: Real DBFilter has MatchType (Exact, Prefix, etc).
-        // Since L1 only stores the trigger string, we might over-fetch slightly if the 
-        // trigger is "cat" and message is "category", but then L2 checks MatchType.
-        // For standard "Keyword" matching which is default, this is correct.
-        if text_lower.contains(&trigger) {
+        // Word-based matching for L1 check (consistent with default MatchType::Word)
+        // Strip punctuation and check whole words
+        let matches = text_lower.split_whitespace().any(|word| {
+            let cleaned = word.trim_matches(|c: char| !c.is_alphanumeric());
+            cleaned == trigger || word == trigger
+        });
+        if matches {
             matched_trigger = Some(trigger);
             break;
         }

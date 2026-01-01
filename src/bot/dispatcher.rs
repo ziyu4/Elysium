@@ -25,9 +25,11 @@ pub type ThrottledBot = Throttle<Bot>;
 #[derive(Clone)]
 pub struct AppState {
     /// Database connection.
+    #[allow(dead_code)]
     pub db: Arc<Database>,
 
     /// Cache registry for creating/accessing caches.
+    #[allow(dead_code)]
     pub cache: Arc<CacheRegistry>,
 
     /// Permission checker with admin caching.

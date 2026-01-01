@@ -99,7 +99,7 @@ impl CacheConfig {
 
     /// Create config for per-message hot path.
     /// High capacity, medium TTL for things checked every message.
-    pub fn message_context() -> Self {
+    pub fn _message_context() -> Self {
         Self {
             max_capacity: 10_000,
             ttl: Some(Duration::from_secs(600)), // 10 minutes
@@ -109,7 +109,7 @@ impl CacheConfig {
 
     /// Create config for lazy-loaded rare features.
     /// Low capacity, short TTL for infrequently accessed data.
-    pub fn lazy_load() -> Self {
+    pub fn _lazy_load() -> Self {
         Self {
             max_capacity: 2_000,
             ttl: Some(Duration::from_secs(300)), // 5 minutes

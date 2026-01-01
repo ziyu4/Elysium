@@ -125,7 +125,7 @@
         "error_empty_reply": "❌ Reply cannot be empty. Calculate text reply or reply to media.",
         "added": "✅ Filter <code>{trigger}</code> added successfully!",
         "none": "📭 No filters in this group.\n\nUse <code>/filter trigger reply</code> to add one.",
-        "list_header": "<b>📋 Filters in this group ({count}):</b>\n\n",
+        "list_header": "<b>📋 Filters in {title} ({count}):</b>\n\n",
         "list_footer": "\nUse <code>/stop trigger</code> to remove a filter.",
         "stop_usage": "📖 Usage: <code>/stop trigger</code>",
         "deleted": "✅ Filter <code>{trigger}</code> deleted successfully!",

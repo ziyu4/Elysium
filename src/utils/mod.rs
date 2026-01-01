@@ -3,10 +3,12 @@
 //! Collection of helper functions used across the bot.
 
 pub mod parser;
+pub mod target;
 
 pub use parser::{
     parse_content, apply_fillings as apply_fillings_new, html_escape, format_duration_full, parse_duration,
 };
+pub use target::get_target_from_msg;
 
 /// Format a username for display.
 ///
