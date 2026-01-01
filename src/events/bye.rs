@@ -9,6 +9,7 @@ use tracing::{debug, info};
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
 use crate::plugins::bye::{build_bye_keyboard, format_bye_text};
+use crate::i18n::get_text;
 
 /// Returns the handler for member leave events.
 pub fn handler() -> UpdateHandler<anyhow::Error> {
@@ -39,6 +40,9 @@ async fn bye_handler(
 
     debug!("Member {} left chat {}", user.id, chat.id);
 
+    // Resolve locale for this chat
+    let locale = state.get_locale(Some(chat.id.0), Some(user.id.0)).await;
+
     // Get bye settings (lazy loaded, 5min TTL)
     let settings = match state.bye.get(chat.id.0).await? {
         Some(s) => s,
@@ -55,10 +59,11 @@ async fn bye_handler(
     }
 
     // Get goodbye message text
+    let default_msg = get_text(&locale, "bye.default_message");
     let template = settings
         .message
         .as_deref()
-        .unwrap_or("👋 Selamat tinggal, {mention}!");
+        .unwrap_or(&default_msg);
 
     let chat_title = chat.title().unwrap_or("Grup");
 

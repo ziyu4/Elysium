@@ -21,6 +21,7 @@ pub mod rules;
 pub mod start;
 pub mod warn;
 pub mod welcome;
+pub mod settings;
 
 use teloxide::dispatching::UpdateHandler;
 use teloxide::prelude::*;
@@ -263,6 +264,9 @@ pub enum Command {
     
     #[command(description = "Ubah masa berlaku peringatan")]
     Warntime,
+
+    #[command(description = "Set language (en/id)")]
+    Setlang,
 }
 
 /// Build the combined command handler.
@@ -359,6 +363,8 @@ pub fn command_handler() -> UpdateHandler<anyhow::Error> {
         .branch(case![Command::Warnmode].endpoint(warn::warnmode_command))
         .branch(case![Command::Warnlimit].endpoint(warn::warnlimit_command))
         .branch(case![Command::Warntime].endpoint(warn::warntime_command))
+        // Settings
+        .branch(case![Command::Setlang].endpoint(settings::setlang_command))
 }
 
 /// Build hashtag handler for notes.
@@ -395,7 +401,8 @@ async fn handle_start(
 
     // Help deep link
     if args == "help" {
-        return help::send_help_menu(&bot, msg.chat.id).await;
+        let locale = state.get_locale(Some(msg.chat.id.0), Some(msg.from.as_ref().map(|u| u.id.0).unwrap_or(0))).await;
+        return help::send_help_menu(&bot, msg.chat.id, &locale).await;
     }
 
     // Default start message

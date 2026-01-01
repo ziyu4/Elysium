@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
 use crate::utils::{html_escape, parse_duration};
+use crate::i18n::get_text;
 
 /// Handle /mute command - now supports optional duration.
 /// /mute @user = mute forever
@@ -58,11 +59,17 @@ async fn mute_action(
         return Ok(());
     }
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     // Permission check
     if !state.permissions.can_restrict_members(chat_id, user_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Anda tidak memiliki izin untuk membatasi member.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanRestrictMembers"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -90,7 +97,7 @@ async fn mute_action(
     let target_id = match target_id {
         Some(id) => id,
         None => {
-            bot.send_message(chat_id, "❌ User tidak ditemukan.")
+            bot.send_message(chat_id, get_text(&locale, "mute.error_user_not_found"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             return Ok(());
@@ -102,7 +109,7 @@ async fn mute_action(
         && state.permissions.is_admin(chat_id, target_id).await.unwrap_or(false) {
             bot.send_message(
                 chat_id,
-                "😏 Kenapa saya harus membisukan seorang admin? Sepertinya itu bukan ide yang bagus."
+                get_text(&locale, "mute.anti_admin")
             )
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
@@ -132,7 +139,7 @@ async fn mute_action(
                     (Some(dt), Some(d), reason_start_idx + 1)
                 } else if requires_duration {
                     // /tmute requires duration but got invalid format
-                    bot.send_message(chat_id, "❌ Format waktu salah. Contoh: 1h, 30m, 1d")
+                    bot.send_message(chat_id, get_text(&locale, "mute.error_time_format"))
                         .reply_parameters(ReplyParameters::new(msg.id))
                         .await?;
                     return Ok(());
@@ -142,7 +149,7 @@ async fn mute_action(
                 }
             } else if requires_duration {
                 // /tmute without any args after target
-                bot.send_message(chat_id, "❌ Tentukan durasi untuk temp mute. Contoh: /tmute @user 1h")
+                bot.send_message(chat_id, get_text(&locale, "mute.error_duration_missing"))
                     .reply_parameters(ReplyParameters::new(msg.id))
                     .await?;
                 return Ok(());
@@ -180,19 +187,22 @@ async fn mute_action(
             if mode != MuteMode::SilentMute {
                 let duration_msg = display_duration.map(|d| format!("\nDurasi: {:?}", d)).unwrap_or_default();
                 let reason_line = reason.as_ref()
-                    .map(|r| format!("\nAlasan: {}", html_escape(r)))
+                    .map(|r| get_text(&locale, "mute.reason").replace("{reason}", &html_escape(r)))
                     .unwrap_or_default();
                 
                 let action_text = if mode == MuteMode::DeleteMute {
-                    "dimute dan pesan dihapus"
+                    get_text(&locale, "mute.action_muted_and_deleted")
                 } else {
-                    "dimute"
+                    get_text(&locale, "mute.action_muted")
                 };
 
-                bot.send_message(chat_id, format!(
-                    "😶 <a href=\"tg://user?id={}\">{}</a> {}.{}{}",
-                    target_id, html_escape(&target_name), action_text, duration_msg, reason_line
-                )).parse_mode(ParseMode::Html).await?;
+                bot.send_message(chat_id, get_text(&locale, "mute.muted")
+                    .replace("{id}", &target_id.to_string())
+                    .replace("{name}", &html_escape(&target_name))
+                    .replace("{action}", &action_text)
+                    .replace("{duration}", &duration_msg)
+                    .replace("{reason}", &reason_line)
+                ).parse_mode(ParseMode::Html).await?;
             }
         },
         MuteMode::Unmute => {
@@ -215,10 +225,10 @@ async fn mute_action(
             
             bot.restrict_chat_member(chat_id, target_id, permissions).await?;
 
-            bot.send_message(chat_id, format!(
-                "🔊 <a href=\"tg://user?id={}\">{}</a> diunmute.",
-                target_id, html_escape(&target_name)
-            )).parse_mode(ParseMode::Html).await?;
+            bot.send_message(chat_id, get_text(&locale, "mute.unmuted")
+                .replace("{id}", &target_id.to_string())
+                .replace("{name}", &html_escape(&target_name))
+            ).parse_mode(ParseMode::Html).await?;
         }
     }
 

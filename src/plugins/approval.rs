@@ -7,6 +7,7 @@ use teloxide::types::{ParseMode, ReplyParameters};
 use tracing::info;
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
+use crate::i18n::get_text;
 
 
 /// Handle /approve command - approve a user.
@@ -24,15 +25,20 @@ pub async fn approve_command(
     let admin_id = user_id.unwrap();
 
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
-        bot.send_message(chat_id, "⚠️ Perintah ini hanya untuk grup.")
+        // Resolve locale (fall back to user lang as we don't have group context effectively if not a group, but safe to use 0)
+        let locale = state.get_locale(Some(chat_id.0), Some(admin_id.0)).await;
+        bot.send_message(chat_id, get_text(&locale, "approval.error_group_only"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
     }
 
+    // Resolve locale
+    let locale = state.get_locale(Some(chat_id.0), Some(admin_id.0)).await;
+
     // Check if user is admin
     if !state.permissions.is_admin(chat_id, admin_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Perintah ini hanya untuk admin.")
+        bot.send_message(chat_id, get_text(&locale, "approval.error_admin_only"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -46,7 +52,7 @@ pub async fn approve_command(
         None => {
             bot.send_message(
                 chat_id,
-                "📖 <b>Penggunaan:</b>\nReply ke pesan user dengan /approve\nAtau: /approve [user_id]",
+                get_text(&locale, "approval.approve_usage"),
             )
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
@@ -58,11 +64,10 @@ pub async fn approve_command(
     let chat_title = msg.chat.title().unwrap_or("grup ini");
 
     if state.message_context.approve_user(chat_id.0, target_id).await? {
-        let message = format!(
-            "✅ {} telah disetujui di <b>{}</b>!\n\n\
-            Mereka sekarang akan diabaikan oleh tindakan otomatis seperti antiflood dan antispam.",
-            target_name, html_escape(chat_title)
-        );
+        let message = get_text(&locale, "approval.approved_success")
+            .replace("{name}", &target_name)
+            .replace("{chat}", &html_escape(chat_title));
+            
         bot.send_message(chat_id, message)
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
@@ -71,7 +76,8 @@ pub async fn approve_command(
     } else {
         bot.send_message(
             chat_id, 
-            format!("ℹ️ {} sudah ada dalam daftar yang disetujui.", target_name)
+            get_text(&locale, "approval.already_approved")
+                .replace("{name}", &target_name)
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -97,8 +103,11 @@ pub async fn unapprove_command(
         return Ok(());
     }
 
+    // Resolve locale
+    let locale = state.get_locale(Some(chat_id.0), Some(admin_id.0)).await;
+
     if !state.permissions.is_admin(chat_id, admin_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Perintah ini hanya untuk admin.")
+        bot.send_message(chat_id, get_text(&locale, "approval.error_admin_only"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -111,7 +120,7 @@ pub async fn unapprove_command(
         None => {
             bot.send_message(
                 chat_id,
-                "📖 Reply ke pesan user dengan /unapprove\nAtau: /unapprove [user_id]",
+                get_text(&locale, "approval.unapprove_usage"),
             )
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
@@ -120,11 +129,9 @@ pub async fn unapprove_command(
     };
 
     if state.message_context.unapprove_user(chat_id.0, target_id).await? {
-        let message = format!(
-            "✅ {} telah dihapus dari daftar persetujuan.\n\n\
-            Mereka sekarang tidak lagi bypass antiflood/antispam.",
-            target_name
-        );
+        let message = get_text(&locale, "approval.unapproved_success")
+            .replace("{name}", &target_name);
+
         bot.send_message(chat_id, message)
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
@@ -133,7 +140,8 @@ pub async fn unapprove_command(
     } else {
         bot.send_message(
             chat_id, 
-            format!("ℹ️ {} tidak ada dalam daftar persetujuan.", target_name)
+            get_text(&locale, "approval.not_approved")
+                .replace("{name}", &target_name)
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -159,11 +167,14 @@ pub async fn unapproveall_command(
         return Ok(());
     }
 
+    // Resolve locale
+    let locale = state.get_locale(Some(chat_id.0), Some(admin_id.0)).await;
+
     // Requires can_promote_members (higher level admin)
     if !state.permissions.can_promote_members(chat_id, admin_id).await.unwrap_or(false) {
         bot.send_message(
             chat_id,
-            "❌ Perintah ini membutuhkan izin 'Tambah Admin' (can_promote_members).",
+            get_text(&locale, "approval.error_promote_permission"),
         )
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
@@ -174,7 +185,8 @@ pub async fn unapproveall_command(
 
     bot.send_message(
         chat_id,
-        format!("✅ Menghapus <b>{}</b> user dari daftar persetujuan.", count),
+        get_text(&locale, "approval.unapprove_all_success")
+            .replace("{count}", &count.to_string()),
     )
     .parse_mode(ParseMode::Html)
     .reply_parameters(ReplyParameters::new(msg.id))
@@ -203,12 +215,13 @@ pub async fn approval_command(
         return Ok(());
     }
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user.id.0)).await;
     let ctx = state.message_context.get_or_default(chat_id.0).await?;
 
     let status = if ctx.is_approved(user.id.0) {
-        "✅ Anda sudah <b>disetujui</b> di grup ini.\n\nAnda akan mengabaikan tindakan otomatis seperti antiflood dan antispam."
+        get_text(&locale, "approval.status_approved")
     } else {
-        "❌ Anda <b>belum disetujui</b> di grup ini."
+        get_text(&locale, "approval.status_not_approved")
     };
 
     bot.send_message(chat_id, status)
@@ -230,17 +243,18 @@ pub async fn approved_command(
         return Ok(());
     }
 
+    let locale = state.get_locale(Some(chat_id.0), Some(msg.from.as_ref().map(|u| u.id.0).unwrap_or(0))).await;
     let ctx = state.message_context.get_or_default(chat_id.0).await?;
 
     if ctx.approved_users.is_empty() {
-        bot.send_message(chat_id, "📋 Belum ada user yang disetujui di grup ini.")
+        bot.send_message(chat_id, get_text(&locale, "approval.list_empty"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
     }
 
     // Build list of approved users
-    let mut list = String::from("<b>📋 Daftar User yang Disetujui</b>\n\n");
+    let mut list = get_text(&locale, "approval.list_header");
     for (i, user_id) in ctx.approved_users.iter().enumerate() {
         list.push_str(&format!(
             "{}. <a href=\"tg://user?id={}\">{}</a>\n",
@@ -249,7 +263,7 @@ pub async fn approved_command(
             user_id
         ));
     }
-    list.push_str(&format!("\n<i>Total: {} user</i>", ctx.approved_users.len()));
+    list.push_str(&get_text(&locale, "approval.list_footer").replace("{count}", &ctx.approved_users.len().to_string()));
 
     bot.send_message(chat_id, list)
         .parse_mode(ParseMode::Html)

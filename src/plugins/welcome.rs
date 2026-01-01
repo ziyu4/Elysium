@@ -12,6 +12,7 @@ use tracing::info;
 use crate::bot::dispatcher::{AppState, ThrottledBot};
 use crate::database::{InlineButton, WelcomeSettings};
 use crate::utils::html_escape;
+use crate::i18n::get_text;
 
 /// Handle /welcome command - show or toggle welcome.
 pub async fn welcome_command(
@@ -26,11 +27,14 @@ pub async fn welcome_command(
     };
 
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
-        bot.send_message(chat_id, "⚠️ Perintah ini hanya untuk grup.")
+        let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+        bot.send_message(chat_id, get_text(&locale, "welcome.error_group_only"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
     }
+
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
 
     if !state
         .permissions
@@ -38,9 +42,13 @@ pub async fn welcome_command(
         .await
         .unwrap_or(false)
     {
-        bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Ubah Info Grup'.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanChangeInfo"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -51,7 +59,7 @@ pub async fn welcome_command(
 
     if args.is_empty() {
         // Show current welcome settings
-        let status = format_welcome_status(&settings);
+        let status = format_welcome_status(&settings, &locale);
         bot.send_message(chat_id, status)
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
@@ -64,7 +72,7 @@ pub async fn welcome_command(
             let mut new_settings = settings.clone();
             new_settings.enabled = true;
             state.welcome.save(&new_settings).await?;
-            bot.send_message(chat_id, "✅ Welcome message diaktifkan!")
+            bot.send_message(chat_id, get_text(&locale, "welcome.enabled"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         }
@@ -72,7 +80,7 @@ pub async fn welcome_command(
             let mut new_settings = settings.clone();
             new_settings.enabled = false;
             state.welcome.save(&new_settings).await?;
-            bot.send_message(chat_id, "❌ Welcome message dinonaktifkan!")
+            bot.send_message(chat_id, get_text(&locale, "welcome.disabled"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         }
@@ -83,14 +91,7 @@ pub async fn welcome_command(
         _ => {
             bot.send_message(
                 chat_id,
-                "<b>📖 Penggunaan Welcome</b>\n\n\
-                <code>/welcome</code> - Lihat status\n\
-                <code>/welcome on</code> - Aktifkan\n\
-                <code>/welcome off</code> - Nonaktifkan\n\
-                <code>/welcome preview</code> - Preview pesan\n\
-                <code>/setwelcome</code> - Atur pesan (reply ke pesan/media)\n\
-                <code>/setwelcomebuttons</code> - Atur tombol\n\
-                <code>/resetwelcome</code> - Reset ke default",
+                get_text(&locale, "welcome.usage"),
             )
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
@@ -113,15 +114,21 @@ pub async fn setwelcome_command(
         None => return Ok(()),
     };
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     if !state
         .permissions
         .can_change_info(chat_id, user_id)
         .await
         .unwrap_or(false)
     {
-        bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Ubah Info Grup'.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanChangeInfo"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -149,7 +156,7 @@ pub async fn setwelcome_command(
         }
 
         state.welcome.save(&settings).await?;
-        bot.send_message(chat_id, "✅ Welcome message berhasil diatur!")
+        bot.send_message(chat_id, get_text(&locale, "welcome.set_success"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         info!("Welcome message set in chat {}", chat_id);
@@ -159,22 +166,13 @@ pub async fn setwelcome_command(
         settings.media_file_id = None;
         settings.media_type = None;
         state.welcome.save(&settings).await?;
-        bot.send_message(chat_id, "✅ Welcome message berhasil diatur!")
+        bot.send_message(chat_id, get_text(&locale, "welcome.set_success"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
     } else {
         bot.send_message(
             chat_id,
-            "<b>📖 Cara mengatur welcome:</b>\n\n\
-            1. Reply ke pesan/media dengan <code>/setwelcome</code>\n\
-            2. Atau: <code>/setwelcome Selamat datang!</code>\n\n\
-            <b>Format yang didukung:</b>\n\
-            <code>{name}</code> - Nama user\n\
-            <code>{username}</code> - Username\n\
-            <code>{mention}</code> - Mention user\n\
-            <code>{id}</code> - User ID\n\
-            <code>{group}</code> - Nama grup\n\
-            <code>{count}</code> - Jumlah member",
+            get_text(&locale, "welcome.set_usage"),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -196,13 +194,15 @@ pub async fn setwelcomebuttons_command(
         None => return Ok(()),
     };
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     if !state
         .permissions
         .can_change_info(chat_id, user_id)
         .await
         .unwrap_or(false)
     {
-        bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Ubah Info Grup'.")
+        bot.send_message(chat_id, get_text(&locale, "welcome.error_permission"))
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
         return Ok(());
@@ -222,20 +222,13 @@ pub async fn setwelcomebuttons_command(
         state.welcome.save(&settings).await?;
 
         if args == "clear" {
-            bot.send_message(chat_id, "✅ Tombol welcome dihapus!")
+            bot.send_message(chat_id, get_text(&locale, "welcome.buttons_cleared"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         } else {
             bot.send_message(
                 chat_id,
-                "<b>📖 Cara mengatur tombol:</b>\n\n\
-                <code>/setwelcomebuttons {button:Teks|url}</code>\n\n\
-                Gunakan <code>:same</code> untuk tombol di baris sama:\n\
-                <code>{button:Teks1|url1}:same {button:Teks2|url2}</code>\n\n\
-                <b>Contoh:</b>\n\
-                <code>/setwelcomebuttons {button:📜 Rules|t.me/bot?start=rules}</code>\n\
-                <code>/setwelcomebuttons {button:📜 Rules|url}:same {button:📢 Channel|url}</code>\n\n\
-                <code>/setwelcomebuttons clear</code> - Hapus semua tombol",
+                get_text(&locale, "welcome.buttons_usage"),
             )
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
@@ -248,7 +241,7 @@ pub async fn setwelcomebuttons_command(
     let buttons = parse_buttons(args);
 
     if buttons.is_empty() {
-        bot.send_message(chat_id, "❌ Format tombol tidak valid. Gunakan: {button:Teks|url}")
+        bot.send_message(chat_id, get_text(&locale, "welcome.error_buttons_format"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -257,7 +250,7 @@ pub async fn setwelcomebuttons_command(
     settings.buttons = buttons;
     state.welcome.save(&settings).await?;
 
-    bot.send_message(chat_id, "✅ Tombol welcome berhasil diatur!")
+    bot.send_message(chat_id, get_text(&locale, "welcome.buttons_set"))
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
 
@@ -276,15 +269,21 @@ pub async fn resetwelcome_command(
         None => return Ok(()),
     };
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     if !state
         .permissions
         .can_change_info(chat_id, user_id)
         .await
         .unwrap_or(false)
     {
-        bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Ubah Info Grup'.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanChangeInfo"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -292,7 +291,7 @@ pub async fn resetwelcome_command(
     _settings = WelcomeSettings::new(chat_id.0); // Reset to default
     state.welcome.save(&_settings).await?;
 
-    bot.send_message(chat_id, "✅ Welcome message direset ke default!")
+    bot.send_message(chat_id, get_text(&locale, "welcome.reset_success"))
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
 
@@ -423,32 +422,39 @@ fn try_parse_welcome_button(chars: &[char], start: usize) -> Option<(InlineButto
 }
 
 /// Format welcome status for display.
-fn format_welcome_status(settings: &WelcomeSettings) -> String {
-    let status = if settings.enabled { "✅ Aktif" } else { "❌ Nonaktif" };
+fn format_welcome_status(settings: &WelcomeSettings, locale: &str) -> String {
+    let status = if settings.enabled {
+        get_text(locale, "welcome.status_active")
+    } else {
+        get_text(locale, "welcome.status_inactive")
+    };
+    
+    let default_msg = get_text(locale, "welcome.status_none");
     let message = settings
         .message
         .as_deref()
-        .unwrap_or("<i>Tidak ada</i>");
+        .unwrap_or(&default_msg);
+        
     let media = if settings.media_file_id.is_some() {
-        format!("✅ {} terlampir", settings.media_type.as_deref().unwrap_or("Media"))
+        get_text(locale, "welcome.status_media_attached")
+            .replace("{type}", settings.media_type.as_deref().unwrap_or("Media"))
     } else {
-        "❌ Tidak ada".to_string()
+        get_text(locale, "welcome.status_no_media")
     };
+    
     let buttons = if settings.buttons.is_empty() {
-        "❌ Tidak ada".to_string()
+        get_text(locale, "welcome.status_no_buttons")
     } else {
         let count: usize = settings.buttons.iter().map(|r| r.len()).sum();
-        format!("✅ {} tombol", count)
+        get_text(locale, "welcome.status_buttons_count")
+            .replace("{count}", &count.to_string())
     };
 
-    format!(
-        "<b>🎉 Pengaturan Welcome</b>\n\n\
-        <b>Status:</b> {}\n\
-        <b>Media:</b> {}\n\
-        <b>Tombol:</b> {}\n\n\
-        <b>Pesan:</b>\n{}",
-        status, media, buttons, message
-    )
+    get_text(locale, "welcome.status_header")
+        .replace("{status}", &status)
+        .replace("{media}", &media)
+        .replace("{buttons}", &buttons)
+        .replace("{message}", message)
 }
 
 /// Send welcome preview.

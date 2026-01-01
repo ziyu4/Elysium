@@ -14,6 +14,7 @@ use crate::utils::parser::format_duration_full as format_duration;
 use crate::utils::{html_escape, parse_duration};
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
+use crate::i18n::get_text;
 
 /// Handle /warn command.
 pub async fn warn_command(bot: ThrottledBot, msg: Message, state: AppState) -> anyhow::Result<()> {
@@ -51,11 +52,16 @@ async fn warn_action(
     }
 
     // Permission check
+    let locale = state.get_locale(Some(chat_id.0), Some(admin_id.0)).await;
     if !state.permissions.can_restrict_members(chat_id, admin_id).await.unwrap_or(false) {
         if action != WarnAction::Silent {
-            bot.send_message(chat_id, "❌ Anda tidak memiliki izin untuk membatasi member.")
-                .reply_parameters(ReplyParameters::new(msg.id))
-                .await?;
+            bot.send_message(
+                chat_id,
+                get_text(&locale, "common.error_missing_permission")
+                    .replace("{permission}", "CanRestrictMembers"),
+            )
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .await?;
         }
         return Ok(());
     }
@@ -65,7 +71,7 @@ async fn warn_action(
         Some(t) => t,
         None => {
             if action != WarnAction::Silent {
-                bot.send_message(chat_id, "❌ Siapa yang mau di warn?")
+                bot.send_message(chat_id, get_text(&locale, "warn.error_no_target"))
                     .reply_parameters(ReplyParameters::new(msg.id))
                     .await?;
             }
@@ -76,7 +82,7 @@ async fn warn_action(
     // Anti-Admin check
     if state.permissions.is_admin(chat_id, target_id).await.unwrap_or(false) {
         if action != WarnAction::Silent {
-            bot.send_message(chat_id, "❌ Maaf, aku terlalu malash untuk memperingatkan admin.")
+            bot.send_message(chat_id, get_text(&locale, "warn.error_admin_target"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         }
@@ -129,6 +135,7 @@ async fn warn_action(
             &target_name,
             &warns_data.config.mode,
             warns_data.config.action_duration_secs,
+            &locale,
         ).await;
 
         // Clear user warnings after penalty
@@ -137,16 +144,15 @@ async fn warn_action(
         if action != WarnAction::Silent {
             let penalty_msg = match penalty_result {
                 Ok(msg) => msg,
-                Err(_) => "❌ Gagal menerapkan hukuman.".to_string(),
+                Err(_) => get_text(&locale, "warn.error_penalty_failed"),
             };
-            bot.send_message(chat_id, format!(
-                "⚠️ <a href=\"tg://user?id={}\">{}</a> telah mencapai batas peringatan ({}/{})!\n\n{}",
-                target_id,
-                html_escape(&target_name),
-                warn_count,
-                limit,
-                penalty_msg
-            ))
+            bot.send_message(chat_id, get_text(&locale, "warn.limit_reached")
+                .replace("{id}", &target_id.to_string())
+                .replace("{name}", &html_escape(&target_name))
+                .replace("{count}", &warn_count.to_string())
+                .replace("{limit}", &limit.to_string())
+                .replace("{penalty}", &penalty_msg)
+            )
             .parse_mode(ParseMode::Html)
             .await?;
         }
@@ -155,24 +161,23 @@ async fn warn_action(
     } else {
         // Just warning
         if action != WarnAction::Silent {
-            let reason_text = reason.as_deref().unwrap_or("Tidak ada alasan");
+            let reason_text_default = get_text(&locale, "warn.no_reason");
+            let reason_text = reason.as_deref().unwrap_or(&reason_text_default);
             let keyboard = InlineKeyboardMarkup::new(vec![vec![
                 InlineKeyboardButton::callback(
-                    "🗑 Hapus peringatan (khusus admin)",
+                    get_text(&locale, "warn.button_remove"),
                     format!("warn_remove:{}:{}", chat_id.0, target_id.0),
                 ),
             ]]);
 
             bot.send_message(
                 chat_id,
-                format!(
-                    "⚠️ <a href=\"tg://user?id={}\">{}</a> memiliki {}/{} peringatan; hati-hati!\n\n<b>Alasan:</b> {}",
-                    target_id,
-                    html_escape(&target_name),
-                    warn_count,
-                    limit,
-                    html_escape(reason_text)
-                ),
+                get_text(&locale, "warn.warning_header")
+                    .replace("{id}", &target_id.to_string())
+                    .replace("{name}", &html_escape(&target_name))
+                    .replace("{count}", &warn_count.to_string())
+                    .replace("{limit}", &limit.to_string())
+                    .replace("{reason}", &html_escape(reason_text)),
             )
             .parse_mode(ParseMode::Html)
             .reply_markup(keyboard)
@@ -193,11 +198,13 @@ async fn apply_warn_penalty(
     user_name: &str,
     mode: &WarnMode,
     duration_secs: u64,
+    locale: &str,
 ) -> anyhow::Result<String> {
     match mode {
         WarnMode::Ban => {
             bot.ban_chat_member(chat_id, user_id).await?;
-            Ok(format!("🔨 {} telah di-ban permanen.", html_escape(user_name)))
+            Ok(get_text(locale, "warn.penalty_ban")
+                .replace("{name}", &html_escape(user_name)))
         }
         WarnMode::Mute => {
             let perms = ChatPermissions::empty();
@@ -205,12 +212,14 @@ async fn apply_warn_penalty(
             bot.restrict_chat_member(chat_id, user_id, perms)
                 .until_date(until)
                 .await?;
-            Ok(format!("🔇 {} telah di-mute permanen.", html_escape(user_name)))
+            Ok(get_text(locale, "warn.penalty_mute")
+                .replace("{name}", &html_escape(user_name)))
         }
         WarnMode::Kick => {
             bot.ban_chat_member(chat_id, user_id).await?;
             let _ = bot.unban_chat_member(chat_id, user_id).await;
-            Ok(format!("👢 {} telah dikeluarkan.", html_escape(user_name)))
+            Ok(get_text(locale, "warn.penalty_kick")
+                .replace("{name}", &html_escape(user_name)))
         }
         WarnMode::TBan => {
             let until = chrono::Utc::now() + chrono::Duration::seconds(duration_secs as i64);
@@ -218,7 +227,9 @@ async fn apply_warn_penalty(
                 .until_date(until)
                 .await?;
             let dur = format_duration(duration_secs);
-            Ok(format!("⏳ {} telah di-ban {}.", html_escape(user_name), dur))
+            Ok(get_text(locale, "warn.penalty_tban")
+                .replace("{name}", &html_escape(user_name))
+                .replace("{duration}", &dur))
         }
         WarnMode::TMute => {
             let perms = ChatPermissions::empty();
@@ -227,7 +238,9 @@ async fn apply_warn_penalty(
                 .until_date(until)
                 .await?;
             let dur = format_duration(duration_secs);
-            Ok(format!("🔇 {} telah di-mute {}.", html_escape(user_name), dur))
+            Ok(get_text(locale, "warn.penalty_tmute")
+                .replace("{name}", &html_escape(user_name))
+                .replace("{duration}", &dur))
         }
     }
 }
@@ -250,6 +263,7 @@ pub async fn warns_command(bot: ThrottledBot, msg: Message, state: AppState) -> 
         return Ok(());
     };
 
+    let locale = state.get_locale(Some(chat_id.0), Some(msg.from.as_ref().map(|u| u.id.0).unwrap_or(0))).await;
     let data = state.warns.get_or_create(chat_id.0).await?;
 
     let user_warns = data.get_user(target_id.0);
@@ -257,23 +271,21 @@ pub async fn warns_command(bot: ThrottledBot, msg: Message, state: AppState) -> 
     let count = user_warns.map(|uw| uw.active_count(data.config.warn_time_secs)).unwrap_or(0);
 
     let message = if count == 0 {
-        format!(
-            "✅ <a href=\"tg://user?id={}\">{}</a> tidak memiliki peringatan.",
-            target_id, html_escape(&target_name)
-        )
+        get_text(&locale, "warn.user_no_warnings")
+            .replace("{id}", &target_id.to_string())
+            .replace("{name}", &html_escape(&target_name))
     } else {
-        let mut text = format!(
-            "⚠️ <a href=\"tg://user?id={}\">{}</a> memiliki {}/{} peringatan:\n\n",
-            target_id,
-            html_escape(&target_name),
-            count,
-            data.config.limit
-        );
+        let mut text = get_text(&locale, "warn.user_warnings_header")
+            .replace("{id}", &target_id.to_string())
+            .replace("{name}", &html_escape(&target_name))
+            .replace("{count}", &count.to_string())
+            .replace("{limit}", &data.config.limit.to_string());
 
         if let Some(uw) = user_warns {
             for (i, w) in uw.warnings.iter().enumerate() {
                 if !w.is_expired(data.config.warn_time_secs) {
-                    let reason = w.reason.as_deref().unwrap_or("Tidak ada alasan");
+                    let reason_text_default = get_text(&locale, "warn.no_reason");
+                    let reason = w.reason.as_deref().unwrap_or(&reason_text_default);
                     text.push_str(&format!("{}. {}\n", i + 1, html_escape(reason)));
                 }
             }
@@ -294,6 +306,9 @@ pub async fn warns_command(bot: ThrottledBot, msg: Message, state: AppState) -> 
 pub async fn rmwarn_command(bot: ThrottledBot, msg: Message, state: AppState) -> anyhow::Result<()> {
     let chat_id = msg.chat.id;
     let admin_id = msg.from.as_ref().map(|u| u.id).unwrap_or(UserId(0));
+    
+    // Resolve locale
+    let locale = state.get_locale(Some(chat_id.0), Some(admin_id.0)).await;
 
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
         return Ok(());
@@ -301,9 +316,13 @@ pub async fn rmwarn_command(bot: ThrottledBot, msg: Message, state: AppState) ->
 
     // Permission check
     if !state.permissions.can_restrict_members(chat_id, admin_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Anda tidak memiliki izin untuk menghapus peringatan.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanRestrictMembers"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -311,7 +330,7 @@ pub async fn rmwarn_command(bot: ThrottledBot, msg: Message, state: AppState) ->
     let (target_id, target_name, _) = match get_target_from_msg(&bot, &msg, &state).await {
         Some(t) => t,
         None => {
-            bot.send_message(chat_id, "❌ Siapa yang mau dihapus peringatannya?")
+            bot.send_message(chat_id, get_text(&locale, "warn.error_no_target_remove"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             return Ok(());
@@ -327,19 +346,17 @@ pub async fn rmwarn_command(bot: ThrottledBot, msg: Message, state: AppState) ->
         
         bot.send_message(
             chat_id,
-            format!(
-                "✅ Peringatan terakhir untuk <a href=\"tg://user?id={}\">{}</a> telah dihapus.\nPeringatan tersisa: {}/{}",
-                target_id,
-                html_escape(&target_name),
-                count,
-                data.config.limit
-            ),
+            get_text(&locale, "warn.removed_last")
+                .replace("{id}", &target_id.to_string())
+                .replace("{name}", &html_escape(&target_name))
+                .replace("{count}", &count.to_string())
+                .replace("{limit}", &data.config.limit.to_string()),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
     } else {
-        bot.send_message(chat_id, "ℹ️ User tidak memiliki peringatan.")
+        bot.send_message(chat_id, get_text(&locale, "warn.user_no_warnings_simple"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
     }
@@ -351,6 +368,9 @@ pub async fn rmwarn_command(bot: ThrottledBot, msg: Message, state: AppState) ->
 pub async fn resetwarn_command(bot: ThrottledBot, msg: Message, state: AppState) -> anyhow::Result<()> {
     let chat_id = msg.chat.id;
     let admin_id = msg.from.as_ref().map(|u| u.id).unwrap_or(UserId(0));
+    
+    // Resolve locale
+    let locale = state.get_locale(Some(chat_id.0), Some(admin_id.0)).await;
 
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
         return Ok(());
@@ -368,7 +388,7 @@ pub async fn resetwarn_command(bot: ThrottledBot, msg: Message, state: AppState)
     let (target_id, target_name, _) = match get_target_from_msg(&bot, &msg, &state).await {
         Some(t) => t,
         None => {
-            bot.send_message(chat_id, "❌ Siapa yang mau direset peringatannya?")
+            bot.send_message(chat_id, get_text(&locale, "warn.error_no_target_reset"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             return Ok(());
@@ -380,17 +400,15 @@ pub async fn resetwarn_command(bot: ThrottledBot, msg: Message, state: AppState)
     if removed {
         bot.send_message(
             chat_id,
-            format!(
-                "✅ Semua peringatan untuk <a href=\"tg://user?id={}\">{}</a> telah dihapus.",
-                target_id,
-                html_escape(&target_name)
-            ),
+            get_text(&locale, "warn.reset_success")
+                .replace("{id}", &target_id.to_string())
+                .replace("{name}", &html_escape(&target_name)),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
     } else {
-        bot.send_message(chat_id, "ℹ️ User tidak memiliki peringatan.")
+        bot.send_message(chat_id, get_text(&locale, "warn.user_no_warnings_simple"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
     }
@@ -408,10 +426,12 @@ pub async fn resetallwarns_command(bot: ThrottledBot, msg: Message, state: AppSt
     }
 
     // Requires can_promote_members
+    let locale = state.get_locale(Some(chat_id.0), Some(admin_id.0)).await;
     if !state.permissions.can_promote_members(chat_id, admin_id).await.unwrap_or(false) {
         bot.send_message(
             chat_id,
-            "❌ Perintah ini membutuhkan izin 'Tambah Admin' (can_promote_members).",
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanPromoteMembers"),
         )
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
@@ -426,7 +446,8 @@ pub async fn resetallwarns_command(bot: ThrottledBot, msg: Message, state: AppSt
 
     bot.send_message(
         chat_id,
-        format!("✅ Menghapus peringatan dari <b>{}</b> user.", count),
+        get_text(&locale, "warn.reset_all_group")
+            .replace("{count}", &count.to_string()),
     )
     .parse_mode(ParseMode::Html)
     .reply_parameters(ReplyParameters::new(msg.id))
@@ -439,6 +460,8 @@ pub async fn resetallwarns_command(bot: ThrottledBot, msg: Message, state: AppSt
 /// Handle /warnings command - view settings.
 pub async fn warnings_command(bot: ThrottledBot, msg: Message, state: AppState) -> anyhow::Result<()> {
     let chat_id = msg.chat.id;
+    // Resolve locale
+    let locale = state.get_locale(Some(chat_id.0), Some(msg.from.as_ref().map(|u| u.id.0).unwrap_or(0))).await;
 
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
         return Ok(());
@@ -448,21 +471,15 @@ pub async fn warnings_command(bot: ThrottledBot, msg: Message, state: AppState) 
 
     let warn_time = match data.config.warn_time_secs {
         Some(secs) => format_duration(secs),
-        None => "Permanen (tidak kadaluarsa)".to_string(),
+        None => get_text(&locale, "warn.permanent_no_expire"),
     };
 
-    let message = format!(
-        "<b>⚠️ Pengaturan Peringatan</b>\n\n\
-        <b>Batas:</b> {}\n\
-        <b>Mode:</b> {} ({})\n\
-        <b>Durasi hukuman:</b> {}\n\
-        <b>Masa berlaku warn:</b> {}",
-        data.config.limit,
-        data.config.mode.as_str(),
-        data.config.mode.description(),
-        format_duration(data.config.action_duration_secs),
-        warn_time
-    );
+    let message = get_text(&locale, "warn.settings_header")
+        .replace("{limit}", &data.config.limit.to_string())
+        .replace("{mode}", &data.config.mode.as_str())
+        .replace("{desc}", &data.config.mode.description()) // Ideally description should be localized too
+        .replace("{duration}", &format_duration(data.config.action_duration_secs))
+        .replace("{validity}", &warn_time);
 
     bot.send_message(chat_id, message)
         .parse_mode(ParseMode::Html)
@@ -477,15 +494,22 @@ pub async fn warnmode_command(bot: ThrottledBot, msg: Message, state: AppState) 
     let chat_id = msg.chat.id;
     let admin_id = msg.from.as_ref().map(|u| u.id).unwrap_or(UserId(0));
 
+    // Resolve locale
+    let locale = state.get_locale(Some(chat_id.0), Some(admin_id.0)).await;
+
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
         return Ok(());
     }
 
     // Permission check
     if !state.permissions.can_restrict_members(chat_id, admin_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Anda tidak memiliki izin untuk mengubah pengaturan.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanRestrictMembers"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -497,12 +521,9 @@ pub async fn warnmode_command(bot: ThrottledBot, msg: Message, state: AppState) 
         let data = state.warns.get_or_create(chat_id.0).await?;
         bot.send_message(
             chat_id,
-            format!(
-                "Mode peringatan saat ini: <b>{}</b> ({})\n\n\
-                Mode tersedia: ban, mute, kick, tban, tmute",
-                data.config.mode.as_str(),
-                data.config.mode.description()
-            ),
+            get_text(&locale, "warn.mode_current")
+                .replace("{mode}", &data.config.mode.as_str())
+                .replace("{desc}", &data.config.mode.description()),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -515,11 +536,9 @@ pub async fn warnmode_command(bot: ThrottledBot, msg: Message, state: AppState) 
                 state.warns.save(&data).await?;
                 bot.send_message(
                     chat_id,
-                    format!(
-                        "✅ Mode peringatan diubah ke <b>{}</b> ({}).",
-                        mode.as_str(),
-                        mode.description()
-                    ),
+                    get_text(&locale, "warn.mode_set")
+                        .replace("{mode}", &mode.as_str())
+                        .replace("{desc}", &mode.description()),
                 )
                 .parse_mode(ParseMode::Html)
                 .reply_parameters(ReplyParameters::new(msg.id))
@@ -528,7 +547,7 @@ pub async fn warnmode_command(bot: ThrottledBot, msg: Message, state: AppState) 
             None => {
                 bot.send_message(
                     chat_id,
-                    "❌ Mode tidak valid. Gunakan: ban, mute, kick, tban, tmute",
+                    get_text(&locale, "warn.mode_invalid"),
                 )
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
@@ -544,15 +563,22 @@ pub async fn warnlimit_command(bot: ThrottledBot, msg: Message, state: AppState)
     let chat_id = msg.chat.id;
     let admin_id = msg.from.as_ref().map(|u| u.id).unwrap_or(UserId(0));
 
+    // Resolve locale
+    let locale = state.get_locale(Some(chat_id.0), Some(admin_id.0)).await;
+
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
         return Ok(());
     }
 
     // Permission check
     if !state.permissions.can_restrict_members(chat_id, admin_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Anda tidak memiliki izin untuk mengubah pengaturan.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanRestrictMembers"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -563,14 +589,15 @@ pub async fn warnlimit_command(bot: ThrottledBot, msg: Message, state: AppState)
         let data = state.warns.get_or_create(chat_id.0).await?;
         bot.send_message(
             chat_id,
-            format!("Batas peringatan saat ini: <b>{}</b>", data.config.limit),
+            get_text(&locale, "warn.limit_current")
+                .replace("{limit}", &data.config.limit.to_string()),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
     } else if let Ok(limit) = args[0].parse::<u32>() {
         if !(1..=100).contains(&limit) {
-            bot.send_message(chat_id, "❌ Batas harus antara 1-100.")
+            bot.send_message(chat_id, get_text(&locale, "warn.error_limit_range"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         } else {
@@ -579,14 +606,15 @@ pub async fn warnlimit_command(bot: ThrottledBot, msg: Message, state: AppState)
             state.warns.save(&data).await?;
             bot.send_message(
                 chat_id,
-                format!("✅ Batas peringatan diubah ke <b>{}</b>.", limit),
+                get_text(&locale, "warn.limit_set")
+                    .replace("{limit}", &limit.to_string()),
             )
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         }
     } else {
-        bot.send_message(chat_id, "❌ Masukkan angka yang valid.")
+        bot.send_message(chat_id, get_text(&locale, "warn.error_number_invalid"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
     }
@@ -598,6 +626,9 @@ pub async fn warnlimit_command(bot: ThrottledBot, msg: Message, state: AppState)
 pub async fn warntime_command(bot: ThrottledBot, msg: Message, state: AppState) -> anyhow::Result<()> {
     let chat_id = msg.chat.id;
     let admin_id = msg.from.as_ref().map(|u| u.id).unwrap_or(UserId(0));
+
+    // Resolve locale
+    let locale = state.get_locale(Some(chat_id.0), Some(admin_id.0)).await;
 
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
         return Ok(());
@@ -618,11 +649,12 @@ pub async fn warntime_command(bot: ThrottledBot, msg: Message, state: AppState) 
         let data = state.warns.get_or_create(chat_id.0).await?;
         let warn_time = match data.config.warn_time_secs {
             Some(secs) => format_duration(secs),
-            None => "Permanen (tidak kadaluarsa)".to_string(),
+            None => get_text(&locale, "warn.permanent_no_expire"),
         };
         bot.send_message(
             chat_id,
-            format!("Masa berlaku peringatan: <b>{}</b>\n\nContoh: /warntime 4w (4 minggu), /warntime off (permanen)", warn_time),
+            get_text(&locale, "warn.time_usage")
+                .replace("{time}", &warn_time),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -631,7 +663,7 @@ pub async fn warntime_command(bot: ThrottledBot, msg: Message, state: AppState) 
         let mut data = state.warns.get_or_create(chat_id.0).await?;
         data.config.warn_time_secs = None;
         state.warns.save(&data).await?;
-        bot.send_message(chat_id, "✅ Peringatan sekarang bersifat permanen (tidak kadaluarsa).")
+        bot.send_message(chat_id, get_text(&locale, "warn.time_set_permanent"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
     } else if let Some(duration) = parse_duration(args[0]) {
@@ -641,7 +673,8 @@ pub async fn warntime_command(bot: ThrottledBot, msg: Message, state: AppState) 
         state.warns.save(&data).await?;
         bot.send_message(
             chat_id,
-            format!("✅ Masa berlaku peringatan diubah ke <b>{}</b>.", format_duration(secs)),
+            get_text(&locale, "warn.time_set")
+                .replace("{time}", &format_duration(secs)),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -649,7 +682,7 @@ pub async fn warntime_command(bot: ThrottledBot, msg: Message, state: AppState) 
     } else {
         bot.send_message(
             chat_id,
-            "❌ Format tidak valid. Contoh: 4m, 3h, 6d, 5w",
+            get_text(&locale, "warn.error_time_format"),
         )
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
@@ -682,8 +715,12 @@ pub async fn warn_callback_handler(
     let chat_id: i64 = parts[1].parse().unwrap_or(0);
     let target_id: u64 = parts[2].parse().unwrap_or(0);
 
+    // Initial locale resolution (default until we parse chat_id)
+    // Actually we can resolve it after parsing.
+    let locale = state.get_locale(Some(chat_id), Some(q.from.id.0)).await;
+
     if chat_id == 0 || target_id == 0 {
-        bot.answer_callback_query(&q.id).text("❌ Data tidak valid.").await?;
+        bot.answer_callback_query(&q.id).text(get_text(&locale, "warn.callback_invalid_data")).await?;
         return Ok(());
     }
 
@@ -692,7 +729,10 @@ pub async fn warn_callback_handler(
     // Check if clicker is admin
     if !state.permissions.can_restrict_members(ChatId(chat_id), clicker_id).await.unwrap_or(false) {
         bot.answer_callback_query(&q.id)
-            .text("❌ Hanya admin yang dapat menghapus peringatan.")
+            .text(
+                get_text(&locale, "common.error_missing_permission")
+                    .replace("{permission}", "CanRestrictMembers"),
+            )
             .show_alert(true)
             .await?;
         return Ok(());
@@ -724,24 +764,23 @@ pub async fn warn_callback_handler(
                 target_id,
                 html_escape(&target_name)
             );
-            let new_text = format!(
-                "✅ Admin {} telah menghapus peringatan {}.\nPeringatan tersisa: {}/{}",
-                admin_mention,
-                target_mention,
-                count,
-                data.config.limit
-            );
+            let new_text = get_text(&locale, "warn.callback_removed")
+                .replace("{admin}", &admin_mention)
+                .replace("{target}", &target_mention)
+                .replace("{count}", &count.to_string())
+                .replace("{limit}", &data.config.limit.to_string());
+            
             let _ = bot.edit_message_text(msg.chat().id, msg.id(), new_text)
                 .parse_mode(ParseMode::Html)
                 .await;
         }
 
         bot.answer_callback_query(&q.id)
-            .text("✅ Peringatan berhasil dihapus.")
+            .text(get_text(&locale, "warn.callback_success"))
             .await?;
     } else {
         bot.answer_callback_query(&q.id)
-            .text("ℹ️ User tidak memiliki peringatan.")
+            .text(get_text(&locale, "warn.user_no_warnings_simple"))
             .await?;
     }
 

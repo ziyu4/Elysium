@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
 use crate::utils::{html_escape, parse_duration};
+use crate::i18n::get_text;
 
 /// Handle /ban command.
 pub async fn ban_command(bot: ThrottledBot, msg: Message, state: AppState) -> anyhow::Result<()> {
@@ -50,7 +51,7 @@ pub async fn unban_command(bot: ThrottledBot, msg: Message, state: AppState) -> 
 }
 
 /// Handle /kickme command - user kicks themselves.
-pub async fn kickme_command(bot: ThrottledBot, msg: Message, _state: AppState) -> anyhow::Result<()> {
+pub async fn kickme_command(bot: ThrottledBot, msg: Message, state: AppState) -> anyhow::Result<()> {
     let chat_id = msg.chat.id;
     let user_id = msg.from.as_ref().map(|u| u.id).unwrap_or(UserId(0));
 
@@ -62,16 +63,18 @@ pub async fn kickme_command(bot: ThrottledBot, msg: Message, _state: AppState) -
         return Ok(());
     }
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     // Ban then unban = kick
     match bot.ban_chat_member(chat_id, user_id).await {
         Ok(_) => {
             let _ = bot.unban_chat_member(chat_id, user_id).await;
-            bot.send_message(chat_id, "👋 Selamat tinggal! Sampai jumpa lagi.")
+            bot.send_message(chat_id, get_text(&locale, "ban.kickme_goodbye"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         }
         Err(e) => {
-            bot.send_message(chat_id, format!("❌ Gagal kick: {}", e))
+            bot.send_message(chat_id, get_text(&locale, "ban.error_kick_failed").replace("{error}", &e.to_string()))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         }
@@ -106,10 +109,15 @@ async fn ban_action(
     }
 
     // Check permission: can_restrict_members
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
     if !state.permissions.can_restrict_members(chat_id, user_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Anda tidak memiliki izin untuk membatasi member.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanRestrictMembers"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -139,7 +147,7 @@ async fn ban_action(
     let target_id = match target_id {
         Some(id) => id,
         None => {
-            bot.send_message(chat_id, "❌ User tidak ditemukan. Reply ke pesan atau gunakan ID.")
+            bot.send_message(chat_id, get_text(&locale, "ban.error_user_not_found"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             return Ok(());
@@ -151,14 +159,14 @@ async fn ban_action(
         && state.permissions.is_admin(chat_id, target_id).await.unwrap_or(false) {
             let action_text = match mode {
                 BanMode::Forever | BanMode::Temporary | BanMode::DeleteAndBan | BanMode::SilentBan => {
-                    "membanned"
+                    get_text(&locale, "ban.action_ban")
                 }
-                BanMode::Kick | BanMode::DeleteKick | BanMode::SilentKick => "menendang",
+                BanMode::Kick | BanMode::DeleteKick | BanMode::SilentKick => get_text(&locale, "ban.action_kick"),
                 BanMode::Unban => unreachable!(),
             };
             bot.send_message(
                 chat_id,
-                format!("😏 Kenapa saya harus {} seorang admin? Sepertinya itu bukan ide yang bagus.", action_text)
+                get_text(&locale, "ban.anti_admin").replace("{action}", &action_text)
             )
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
@@ -171,13 +179,13 @@ async fn ban_action(
             if let Some(d) = parse_duration(parts[reason_start_idx]) {
                 (Some(d), reason_start_idx + 1)
             } else {
-                bot.send_message(chat_id, "❌ Format waktu salah. Contoh: 1h, 30m, 1d")
+                bot.send_message(chat_id, get_text(&locale, "ban.error_time_format"))
                     .reply_parameters(ReplyParameters::new(msg.id))
                     .await?;
                 return Ok(());
             }
         } else {
-             bot.send_message(chat_id, "❌ Tentukan durasi untuk temp ban.")
+             bot.send_message(chat_id, get_text(&locale, "ban.error_duration_missing"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             return Ok(());
@@ -196,7 +204,7 @@ async fn ban_action(
 
     // Format reason line - empty if no reason
     let reason_line = reason.as_ref()
-        .map(|r| format!("\nAlasan: {}", html_escape(r)))
+        .map(|r| get_text(&locale, "ban.reason").replace("{reason}", &html_escape(r)))
         .unwrap_or_default();
 
     // For silent modes, delete command message first
@@ -210,10 +218,11 @@ async fn ban_action(
         BanMode::Forever => {
             bot.ban_chat_member(chat_id, target_id)
                 .await?;
-            bot.send_message(chat_id, format!(
-                "⛔ <a href=\"tg://user?id={}\">{}</a> dibanned.{}",
-                target_id, html_escape(&target_name), reason_line
-            )).parse_mode(ParseMode::Html).await?;
+            bot.send_message(chat_id, get_text(&locale, "ban.banned")
+                .replace("{id}", &target_id.to_string())
+                .replace("{name}", &html_escape(&target_name))
+                .replace("{reason}", &reason_line)
+            ).parse_mode(ParseMode::Html).await?;
         },
         BanMode::Temporary => {
             let d = duration.unwrap();
@@ -225,10 +234,12 @@ async fn ban_action(
                 .until_date(until_dt)
                 .await?;
 
-            bot.send_message(chat_id, format!(
-                "⛔ <a href=\"tg://user?id={}\">{}</a> dibanned sementara.\nDurasi: {:?}{}",
-                target_id, html_escape(&target_name), d, reason_line
-            )).parse_mode(ParseMode::Html).await?;
+            bot.send_message(chat_id, get_text(&locale, "ban.tban")
+                .replace("{id}", &target_id.to_string())
+                .replace("{name}", &html_escape(&target_name))
+                .replace("{duration}", &format!("{:?}", d)) // Ideally format_duration
+                .replace("{reason}", &reason_line)
+            ).parse_mode(ParseMode::Html).await?;
         },
         BanMode::DeleteAndBan => {
             if let Some(reply) = msg.reply_to_message() {
@@ -236,10 +247,11 @@ async fn ban_action(
             }
             bot.ban_chat_member(chat_id, target_id).await?;
             
-            bot.send_message(chat_id, format!(
-                "⛔ <a href=\"tg://user?id={}\">{}</a> dibanned dan pesan dihapus.{}",
-                target_id, html_escape(&target_name), reason_line
-            )).parse_mode(ParseMode::Html).await?;
+            bot.send_message(chat_id, get_text(&locale, "ban.dban")
+                .replace("{id}", &target_id.to_string())
+                .replace("{name}", &html_escape(&target_name))
+                .replace("{reason}", &reason_line)
+            ).parse_mode(ParseMode::Html).await?;
         },
         BanMode::SilentBan => {
             // Silent - no message, command already deleted
@@ -250,10 +262,11 @@ async fn ban_action(
             bot.ban_chat_member(chat_id, target_id).await?;
             bot.unban_chat_member(chat_id, target_id).await?;
             
-            bot.send_message(chat_id, format!(
-                "👢 <a href=\"tg://user?id={}\">{}</a> dikick.{}",
-                target_id, html_escape(&target_name), reason_line
-            )).parse_mode(ParseMode::Html).await?;
+            bot.send_message(chat_id, get_text(&locale, "ban.kicked")
+                .replace("{id}", &target_id.to_string())
+                .replace("{name}", &html_escape(&target_name))
+                .replace("{reason}", &reason_line)
+            ).parse_mode(ParseMode::Html).await?;
         },
         BanMode::DeleteKick => {
             if let Some(reply) = msg.reply_to_message() {
@@ -262,10 +275,11 @@ async fn ban_action(
             bot.ban_chat_member(chat_id, target_id).await?;
             bot.unban_chat_member(chat_id, target_id).await?;
             
-            bot.send_message(chat_id, format!(
-                "👢 <a href=\"tg://user?id={}\">{}</a> dikick dan pesan dihapus.{}",
-                target_id, html_escape(&target_name), reason_line
-            )).parse_mode(ParseMode::Html).await?;
+            bot.send_message(chat_id, get_text(&locale, "ban.dkick")
+                .replace("{id}", &target_id.to_string())
+                .replace("{name}", &html_escape(&target_name))
+                .replace("{reason}", &reason_line)
+            ).parse_mode(ParseMode::Html).await?;
         },
         BanMode::SilentKick => {
             // Silent - no message, command already deleted
@@ -274,10 +288,10 @@ async fn ban_action(
         },
         BanMode::Unban => {
              bot.unban_chat_member(chat_id, target_id).await?;
-             bot.send_message(chat_id, format!(
-                "✅ <a href=\"tg://user?id={}\">{}</a> diunban.",
-                target_id, html_escape(&target_name)
-            )).parse_mode(ParseMode::Html).await?;
+             bot.send_message(chat_id, get_text(&locale, "ban.unbanned")
+                .replace("{id}", &target_id.to_string())
+                .replace("{name}", &html_escape(&target_name))
+            ).parse_mode(ParseMode::Html).await?;
         },
     }
 

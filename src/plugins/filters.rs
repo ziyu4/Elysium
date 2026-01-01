@@ -9,6 +9,7 @@ use tracing::info;
 use crate::bot::dispatcher::{AppState, ThrottledBot};
 use crate::database::{DbFilter, MatchType};
 use crate::utils::{html_escape, parse_content};
+use crate::i18n::get_text;
 
 /// Handle /filter command - add a new filter.
 ///
@@ -33,10 +34,15 @@ pub async fn filter_command(
     }
 
     // Check permission: can_change_info
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
     if !state.permissions.can_change_info(chat_id, user_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Ubah Info Grup'.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanChangeInfo"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -46,21 +52,10 @@ pub async fn filter_command(
         .unwrap_or("");
 
     if args.is_empty() {
-        // Show help
+        // Show help - reuse help.filters_text
         bot.send_message(
             chat_id,
-            "<b>📖 Cara menggunakan filter:</b>\n\n\
-            <code>/filter trigger reply</code>\n\
-            <code>/filter \"multi word\" reply</code>\n\n\
-            <b>Prefix khusus:</b>\n\
-            • <code>exact:trigger</code> - Hanya cocok jika pesan persis sama\n\
-            • <code>prefix:trigger</code> - Hanya cocok jika pesan dimulai dengan trigger\n\n\
-            <b>Tags:</b>\n\
-            • <code>{admin}</code> - Hanya admin yang trigger\n\
-            • <code>{user}</code> - Hanya non-admin yang trigger\n\
-            • <code>{protect}</code> - Tidak bisa diforward\n\n\
-            <b>Random reply:</b>\n\
-            Gunakan <code>%%%</code> untuk memisahkan reply acak",
+            get_text(&locale, "help.filters_text"),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -72,7 +67,7 @@ pub async fn filter_command(
     let (trigger, reply) = parse_filter_args(args);
 
     if trigger.is_empty() {
-        bot.send_message(chat_id, "❌ Trigger tidak boleh kosong.")
+        bot.send_message(chat_id, get_text(&locale, "filters.error_empty_trigger"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -98,7 +93,7 @@ pub async fn filter_command(
         }
 
     if final_reply.is_empty() && media_file_id.is_none() {
-        bot.send_message(chat_id, "❌ Reply tidak boleh kosong. Berikan teks reply atau reply ke media.")
+        bot.send_message(chat_id, get_text(&locale, "filters.error_empty_reply"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -133,7 +128,8 @@ pub async fn filter_command(
 
     bot.send_message(
         chat_id,
-        format!("✅ Filter <code>{}</code> berhasil ditambahkan!", html_escape(&clean_trigger)),
+        get_text(&locale, "filters.added")
+            .replace("{trigger}", &html_escape(&clean_trigger)),
     )
     .parse_mode(ParseMode::Html)
     .reply_parameters(ReplyParameters::new(msg.id))
@@ -161,19 +157,23 @@ pub async fn filters_command(
     // Get triggers from FilterRepository (L1 cache)
     let triggers = state.filters.get_triggers(chat_id.0).await?;
 
+    let locale = state.get_locale(Some(chat_id.0), Some(msg.from.as_ref().map(|u| u.id.0).unwrap_or(0))).await;
+
     if triggers.is_empty() {
-        bot.send_message(chat_id, "📭 Tidak ada filter di grup ini.\n\nGunakan <code>/filter trigger reply</code> untuk menambahkan.")
+        bot.send_message(chat_id, get_text(&locale, "filters.none"))
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
     }
 
-    let mut text = format!("<b>📋 Filter di grup ini ({}):</b>\n\n", triggers.len());
+    let mut text = get_text(&locale, "filters.list_header")
+        .replace("{count}", &triggers.len().to_string());
+
     for trigger in triggers {
         text.push_str(&format!("• <code>{}</code>\n", html_escape(&trigger)));
     }
-    text.push_str("\nGunakan <code>/stop trigger</code> untuk menghapus filter.");
+    text.push_str(&get_text(&locale, "filters.list_footer"));
 
     bot.send_message(chat_id, text)
         .parse_mode(ParseMode::Html)
@@ -201,10 +201,15 @@ pub async fn stop_command(
     }
 
     // Check permission
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
     if !state.permissions.can_change_info(chat_id, user_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Ubah Info Grup'.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanChangeInfo"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -214,7 +219,7 @@ pub async fn stop_command(
         .unwrap_or("");
 
     if trigger.is_empty() {
-        bot.send_message(chat_id, "📖 Gunakan: <code>/stop trigger</code>")
+        bot.send_message(chat_id, get_text(&locale, "filters.stop_usage"))
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
@@ -227,7 +232,8 @@ pub async fn stop_command(
 
         bot.send_message(
             chat_id,
-            format!("✅ Filter <code>{}</code> berhasil dihapus!", html_escape(trigger)),
+            get_text(&locale, "filters.deleted")
+                .replace("{trigger}", &html_escape(trigger)),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -235,7 +241,8 @@ pub async fn stop_command(
     } else {
         bot.send_message(
             chat_id,
-            format!("❌ Filter <code>{}</code> tidak ditemukan.", html_escape(trigger)),
+            get_text(&locale, "filters.not_found")
+                .replace("{trigger}", &html_escape(trigger)),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -263,10 +270,15 @@ pub async fn stopall_command(
     }
 
     // Check permission: must be owner
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
     if !state.permissions.is_owner(chat_id, user_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Hanya owner grup yang bisa menghapus semua filter.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "GroupOwner"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -283,7 +295,8 @@ pub async fn stopall_command(
 
     bot.send_message(
         chat_id,
-        format!("✅ {} filter berhasil dihapus!", count),
+        get_text(&locale, "filters.deleted_all")
+            .replace("{count}", &count.to_string()),
     )
     .reply_parameters(ReplyParameters::new(msg.id))
     .await?;

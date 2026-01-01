@@ -19,6 +19,11 @@ pub struct MessageContext {
     /// Group title (cached for reference)
     #[serde(default)]
     pub title: Option<String>,
+    
+    /// Cached Group Info (ID, Title, Lang)
+    /// This effectively replaces/augments the title field above
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_info: Option<GroupInfo>,
 
     /// Approved user IDs (bypass antiflood)
     #[serde(default)]
@@ -36,6 +41,7 @@ impl MessageContext {
             id: None,
             chat_id,
             title: None,
+            group_info: None,
             approved_users: Vec::new(),
             antiflood: AntifloodConfig::default(),
         }
@@ -73,3 +79,14 @@ impl MessageContext {
         count
     }
 }
+
+/// Cached minimal group info.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupInfo {
+    pub id: i64,
+    pub title: String,
+    // Add other needed fields like username if needed
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lang: Option<String>,
+}
+

@@ -107,6 +107,31 @@ impl AppState {
     pub fn is_owner(&self, user_id: u64) -> bool {
         self.owner_ids.contains(&user_id)
     }
+
+    /// Resolve locale for a context (User + Chat).
+    pub async fn get_locale(&self, chat_id: Option<i64>, user_id: Option<u64>) -> String {
+        let mut group_lang = None;
+        let mut user_lang = None;
+
+        // check group lang
+        if let Some(chat) = chat_id {
+             if let Ok(ctx) = self.message_context.get_or_default(chat).await {
+                 if let Some(info) = ctx.group_info {
+                     group_lang = info.lang;
+                 }
+                 // If not set, maybe check antiflood config or other settings? Nah.
+             }
+        }
+
+        // check user lang
+        if let Some(uid) = user_id {
+            if let Ok(Some(u)) = self.users.get_by_id(uid).await {
+                user_lang = u.lang;
+            }
+        }
+        
+        crate::i18n::resolve_locale(group_lang.as_deref(), user_lang.as_deref())
+    }
 }
 
 /// Build the dispatcher with all handlers.

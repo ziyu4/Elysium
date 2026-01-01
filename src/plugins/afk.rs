@@ -11,6 +11,7 @@ use tracing::info;
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
 use crate::utils::{format_duration_full, html_escape};
+use crate::i18n::get_text;
 
 /// Handle /afk command - set AFK status.
 ///
@@ -39,18 +40,18 @@ pub async fn afk_command(
 
     info!("User {} went AFK in chat {}", user_id, chat_id);
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id)).await;
+    
     let reason_text = reason
-        .map(|r| format!("\nAlasan: {}", html_escape(&r)))
+        .map(|r| get_text(&locale, "afk.reason").replace("{reason}", &html_escape(&r)))
         .unwrap_or_default();
 
     bot.send_message(
         chat_id,
-        format!(
-            "💤 <a href=\"tg://user?id={}\">{}</a> sekarang AFK!{}",
-            user_id,
-            html_escape(&user.first_name),
-            reason_text
-        ),
+        get_text(&locale, "afk.now_afk")
+            .replace("{id}", &user_id.to_string())
+            .replace("{name}", &html_escape(&user.first_name))
+            .replace("{reason}", &reason_text),
     )
     .parse_mode(ParseMode::Html)
     .reply_parameters(ReplyParameters::new(msg.id))
@@ -97,17 +98,18 @@ pub async fn afk_handler(
             
             state.users.remove_afk(user_id).await?;
 
-            let reason_text = format!("\nAlasan: {}", html_escape(reason));
+            let locale = state.get_locale(Some(chat_id.0), Some(user_id)).await;
+
+            let reason_text = get_text(&locale, "afk.reason")
+                .replace("{reason}", &html_escape(reason));
 
             bot.send_message(
                 chat_id,
-                format!(
-                    "<a href=\"tg://user?id={}\">{}</a> kembali dari afk.{}\nSejak: {} yang lalu.",
-                    user_id,
-                    html_escape(&user.first_name),
-                    reason_text,
-                    duration
-                ),
+                get_text(&locale, "afk.returned_afk")
+                    .replace("{id}", &user_id.to_string())
+                    .replace("{name}", &html_escape(&user.first_name))
+                    .replace("{reason}", &reason_text)
+                    .replace("{duration}", &duration),
             )
             .parse_mode(ParseMode::Html)
             .disable_notification(true)
@@ -124,9 +126,9 @@ pub async fn afk_handler(
         && let Some(reply_user) = &reply.from {
             let reply_user_id = reply_user.id.0;
             // Fetch replied user data
-            if let Ok(Some(target)) = state.users.get_by_id(reply_user_id).await {
+                    if let Ok(Some(target)) = state.users.get_by_id(reply_user_id).await {
                 if target.afk_reason.is_some() && !notified_users.contains(&reply_user_id) {
-                    send_afk_notification(&bot, chat_id, msg.id, &target).await?;
+                    send_afk_notification(&bot, chat_id, msg.id, &target, &state).await?;
                     notified_users.insert(reply_user_id);
                 }
             }
@@ -143,7 +145,7 @@ pub async fn afk_handler(
                     let mentioned_user_id = mentioned_user.id.0;
                     if let Ok(Some(target)) = state.users.get_by_id(mentioned_user_id).await {
                         if target.afk_reason.is_some() && !notified_users.contains(&mentioned_user_id) {
-                            send_afk_notification(&bot, chat_id, msg.id, &target).await?;
+                            send_afk_notification(&bot, chat_id, msg.id, &target, &state).await?;
                             notified_users.insert(mentioned_user_id);
                         }
                     }
@@ -158,7 +160,7 @@ pub async fn afk_handler(
                         // Resolve username -> UserData (Includes AFK status!)
                         if let Ok(Some(target)) = state.users.get_by_username(username).await {
                              if target.afk_reason.is_some() && !notified_users.contains(&target.user_id) {
-                                send_afk_notification(&bot, chat_id, msg.id, &target).await?;
+                                send_afk_notification(&bot, chat_id, msg.id, &target, &state).await?;
                                 notified_users.insert(target.user_id);
                             }
                         }
@@ -177,24 +179,26 @@ async fn send_afk_notification(
     chat_id: teloxide::types::ChatId,
     reply_to_msg_id: MessageId,
     user: &crate::database::CachedUser,
+    state: &AppState,
 ) -> anyhow::Result<()> {
     let duration_secs = user.afk_time.map(|t| chrono::Utc::now().timestamp() - t).unwrap_or(0) as u64;
     let duration = format_duration_full(duration_secs);
     
+    // Resolve locale - we can use chat_id default because we are notifying the group
+    let locale = state.get_locale(Some(chat_id.0), None).await;
+
     let reason_text = user.afk_reason
         .as_ref()
-        .map(|r| format!("\nAlasan: {}", html_escape(r)))
+        .map(|r| get_text(&locale, "afk.reason").replace("{reason}", &html_escape(r)))
         .unwrap_or_default();
 
     bot.send_message(
         chat_id,
-        format!(
-            "<a href=\"tg://user?id={}\">{}</a> sedang afk.{}\nSejak: {} yang lalu.",
-            user.user_id,
-            html_escape(&user.first_name),
-            reason_text,
-            duration
-        ),
+        get_text(&locale, "afk.is_afk")
+            .replace("{id}", &user.user_id.to_string())
+            .replace("{name}", &html_escape(&user.first_name))
+            .replace("{reason}", &reason_text)
+            .replace("{duration}", &duration),
     )
     .parse_mode(ParseMode::Html)
     .disable_notification(true)

@@ -1,28 +1,14 @@
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 
-pub fn get_text() -> String {
-    "<b>🌊 Bantuan: Antiflood</b>\n\n\
-    Proteksi otomatis dari spam/flood pesan.\n\n\
-    <b>Perintah:</b>\n\
-    • <code>/antiflood</code> - Lihat status\n\
-    • <code>/setflood [jumlah]</code> - Atur batas pesan\n\
-    • <code>/setflood off</code> - Nonaktifkan\n\
-    • <code>/setfloodpenalty [mode]</code> - Atur hukuman\n\n\
-    <b>Mode Hukuman:</b>\n\
-    • <code>warn</code> - Peringatan saja\n\
-    • <code>mute</code> - Mute permanen\n\
-    • <code>kick</code> - Kick dari grup\n\
-    • <code>ban</code> - Ban permanen\n\
-    • <code>tban [durasi]</code> - Ban sementara\n\n\
-    <b>Cara Kerja:</b>\n\
-    Jika user mengirim lebih dari X pesan dalam waktu singkat, hukuman diterapkan.\n\n\
-    <b>Bypass:</b>\n\
-    Admin dan user yang di-approve tidak terkena antiflood."
-    .to_string()
+pub fn get_text(locale: &str) -> String {
+    crate::i18n::get_text(locale, "help.antiflood_text")
 }
 
-pub fn get_keyboard() -> InlineKeyboardMarkup {
+pub fn get_keyboard(locale: &str) -> InlineKeyboardMarkup {
+    let back_text = crate::i18n::get_text(locale, "help.back");
+    let back_text = if back_text == "help.back" { "🔙 Back".to_string() } else { format!("🔙 {}", back_text) };
+
     InlineKeyboardMarkup::new(vec![
-        vec![InlineKeyboardButton::callback("🔙 Kembali", "help:back")],
+        vec![InlineKeyboardButton::callback(back_text, "help:back")],
     ])
 }

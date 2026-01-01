@@ -30,6 +30,10 @@ pub struct CachedUser {
     /// Time when user went AFK.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub afk_time: Option<i64>,
+
+    /// Language code (e.g., "en", "id").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lang: Option<String>,
 }
 
 impl CachedUser {
@@ -47,6 +51,9 @@ impl CachedUser {
             // Default to Not AFK
             afk_reason: None,
             afk_time: None,
+            
+            // Default language
+            lang: None,
         }
     }
 

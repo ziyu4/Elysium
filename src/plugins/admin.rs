@@ -8,6 +8,7 @@ use tracing::info;
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
 use crate::utils::html_escape;
+use crate::i18n::get_text;
 
 /// Handle /promote command - promote a user to admin.
 ///
@@ -19,10 +20,11 @@ pub async fn promote_command(
 ) -> anyhow::Result<()> {
     let chat_id = msg.chat.id;
     let user_id = msg.from.as_ref().map(|u| u.id).unwrap_or(UserId(0));
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
 
     // Must be in group
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
-        bot.send_message(chat_id, "⚠️ Perintah ini hanya untuk grup.")
+        bot.send_message(chat_id, get_text(&locale, "admin.error_group_only"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -30,9 +32,13 @@ pub async fn promote_command(
 
     // Check permission: can_promote_members
     if !state.permissions.can_promote_members(chat_id, user_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Tambah Admin Baru'.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanPromoteMembers"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -54,10 +60,7 @@ pub async fn promote_command(
     } else {
         bot.send_message(
             chat_id,
-            "📖 <b>Cara menggunakan:</b>\n\n\
-            <code>/promote</code> - Reply ke pesan user\n\
-            <code>/promote @username</code> - By username\n\
-            <code>/promote @username Custom Title</code> - Dengan title",
+            get_text(&locale, "admin.promote_usage"),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -68,7 +71,7 @@ pub async fn promote_command(
     let target_user_id = match target_user_id {
         Some(id) => id,
         None => {
-            bot.send_message(chat_id, "❌ User tidak ditemukan. Reply ke pesan atau gunakan @username.")
+            bot.send_message(chat_id, get_text(&locale, "admin.error_user_not_found"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             return Ok(());
@@ -114,24 +117,24 @@ pub async fn promote_command(
             }
 
             let title_msg = custom_title
-                .map(|t| format!(" dengan title <b>{}</b>", html_escape(&t)))
+                .map(|t| format!(" ({})", html_escape(&t)))
                 .unwrap_or_default();
+
+            let success_text = get_text(&locale, "admin.promote_success")
+                .replace("{user_id}", &target_user_id.to_string())
+                .replace("{user_name}", &target_user_id.to_string())
+                .replace("{title}", &title_msg);
 
             bot.send_message(
                 chat_id,
-                format!(
-                    "✅ <a href=\"tg://user?id={}\">{}</a> telah dipromosikan menjadi admin{}!",
-                    target_user_id,
-                    target_user_id,
-                    title_msg
-                ),
+                success_text,
             )
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         }
         Err(e) => {
-            bot.send_message(chat_id, format!("❌ Gagal mempromosikan user: {}", e))
+            bot.send_message(chat_id, get_text(&locale, "admin.promote_fail").replace("{error}", &e.to_string()))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         }
@@ -150,10 +153,11 @@ pub async fn demote_command(
 ) -> anyhow::Result<()> {
     let chat_id = msg.chat.id;
     let user_id = msg.from.as_ref().map(|u| u.id).unwrap_or(UserId(0));
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
 
     // Must be in group
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
-        bot.send_message(chat_id, "⚠️ Perintah ini hanya untuk grup.")
+        bot.send_message(chat_id, get_text(&locale, "admin.error_group_only"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -161,9 +165,13 @@ pub async fn demote_command(
 
     // Check permission: can_promote_members
     if !state.permissions.can_promote_members(chat_id, user_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Tambah Admin Baru'.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanPromoteMembers"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -178,9 +186,7 @@ pub async fn demote_command(
     } else {
         bot.send_message(
             chat_id,
-            "📖 <b>Cara menggunakan:</b>\n\n\
-            <code>/demote</code> - Reply ke pesan admin\n\
-            <code>/demote @username</code> - By username",
+            get_text(&locale, "admin.demote_usage"),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -191,7 +197,7 @@ pub async fn demote_command(
     let target_user_id = match target_user_id {
         Some(id) => id,
         None => {
-            bot.send_message(chat_id, "❌ User tidak ditemukan. Reply ke pesan atau gunakan @username.")
+            bot.send_message(chat_id, get_text(&locale, "admin.error_user_not_found"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             return Ok(());
@@ -215,20 +221,20 @@ pub async fn demote_command(
             // Invalidate permissions cache
             state.permissions.invalidate(chat_id, target_user_id);
 
+            let success_text = get_text(&locale, "admin.demote_success")
+                .replace("{user_id}", &target_user_id.to_string())
+                .replace("{user_name}", &target_user_id.to_string());
+
             bot.send_message(
                 chat_id,
-                format!(
-                    "✅ <a href=\"tg://user?id={}\">{}</a> telah di-demote menjadi member biasa.",
-                    target_user_id,
-                    target_user_id
-                ),
+                success_text,
             )
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         }
         Err(e) => {
-            bot.send_message(chat_id, format!("❌ Gagal men-demote admin: {}", e))
+            bot.send_message(chat_id, get_text(&locale, "admin.demote_fail").replace("{error}", &e.to_string()))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         }

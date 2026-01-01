@@ -9,6 +9,7 @@ use tracing::{debug, info};
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
 use crate::plugins::welcome::{build_welcome_keyboard, format_welcome_text};
+use crate::i18n::get_text;
 
 /// Returns the handler for new member events.
 pub fn handler() -> UpdateHandler<anyhow::Error> {
@@ -39,6 +40,9 @@ async fn welcome_handler(
 
     debug!("New member {} joined chat {}", user.id, chat.id);
 
+    // Resolve locale for this chat (using group config first)
+    let locale = state.get_locale(Some(chat.id.0), Some(user.id.0)).await;
+
     // Get welcome settings (lazy loaded, 5min TTL)
     let settings = match state.welcome.get(chat.id.0).await? {
         Some(s) => s,
@@ -55,10 +59,11 @@ async fn welcome_handler(
     }
 
     // Get welcome message text
+    let default_msg = get_text(&locale, "welcome.default_message");
     let template = settings
         .message
         .as_deref()
-        .unwrap_or("👋 Selamat datang, {mention}!");
+        .unwrap_or(&default_msg);
 
     let chat_title = chat.title().unwrap_or("Grup");
 

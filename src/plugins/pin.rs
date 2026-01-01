@@ -7,6 +7,7 @@ use teloxide::types::{ParseMode, ReplyParameters, UserId};
 use tracing::info;
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
+use crate::i18n::get_text;
 
 /// Handle /pin command - pin a message.
 /// 
@@ -19,10 +20,11 @@ pub async fn pin_command(
 ) -> anyhow::Result<()> {
     let chat_id = msg.chat.id;
     let user_id = msg.from.as_ref().map(|u| u.id).unwrap_or(UserId(0));
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
 
     // Must be in group
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
-        bot.send_message(chat_id, "⚠️ Perintah ini hanya untuk grup.")
+        bot.send_message(chat_id, get_text(&locale, "pin.error_group_only"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -30,9 +32,13 @@ pub async fn pin_command(
 
     // Check permission: can_pin_messages
     if !state.permissions.can_pin_messages(chat_id, user_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Anda tidak memiliki izin untuk menyematkan pesan.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanPinMessages"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -40,7 +46,7 @@ pub async fn pin_command(
     let reply = match msg.reply_to_message() {
         Some(r) => r,
         None => {
-            bot.send_message(chat_id, "❌ Reply ke pesan yang ingin disematkan.")
+            bot.send_message(chat_id, get_text(&locale, "pin.error_no_reply"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             return Ok(());
@@ -60,9 +66,9 @@ pub async fn pin_command(
         Ok(_) => {
             info!("Pinned message {} in chat {} (notify: {})", reply.id, chat_id, notify);
             let text = if notify {
-                "✅ Pesan disematkan (dengan notifikasi)."
+                get_text(&locale, "pin.pinned_notify")
             } else {
-                "✅ Pesan disematkan."
+                get_text(&locale, "pin.pinned")
             };
             
             bot.send_message(chat_id, text)
@@ -70,7 +76,7 @@ pub async fn pin_command(
                 .await?;
         }
         Err(e) => {
-            bot.send_message(chat_id, format!("❌ Gagal menyematkan pesan: {}", e))
+            bot.send_message(chat_id, get_text(&locale, "pin.error_failed").replace("{error}", &e.to_string()))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         }
@@ -93,17 +99,24 @@ pub async fn permapin_command(
 
     // Must be in group
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
-        bot.send_message(chat_id, "⚠️ Perintah ini hanya untuk grup.")
+        let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+        bot.send_message(chat_id, get_text(&locale, "pin.error_group_only"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
     }
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     // Check permission: can_pin_messages
     if !state.permissions.can_pin_messages(chat_id, user_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Anda tidak memiliki izin untuk menyematkan pesan.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanPinMessages"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -112,7 +125,7 @@ pub async fn permapin_command(
     let content = text.strip_prefix("/permapin").unwrap_or("").trim();
 
     if content.is_empty() {
-        bot.send_message(chat_id, "❌ Berikan teks yang ingin disematkan.\nContoh: /permapin Pengumuman penting!")
+        bot.send_message(chat_id, get_text(&locale, "pin.permapin_missing_content"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -134,7 +147,7 @@ pub async fn permapin_command(
             let _ = bot.delete_message(chat_id, msg.id).await;
         }
         Err(e) => {
-            bot.send_message(chat_id, format!("❌ Gagal menyematkan pesan: {}", e))
+            bot.send_message(chat_id, get_text(&locale, "pin.permapin_failed").replace("{error}", &e.to_string()))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         }
@@ -147,13 +160,15 @@ pub async fn permapin_command(
 pub async fn pinned_command(
     bot: ThrottledBot,
     msg: Message,
-    _state: AppState,
+    state: AppState,
 ) -> anyhow::Result<()> {
     let chat_id = msg.chat.id;
 
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
         return Ok(());
     }
+    
+    let locale = state.get_locale(Some(chat_id.0), Some(msg.from.as_ref().map(|u| u.id.0).unwrap_or(0))).await;
 
     // Get chat info to find pinned message
     match bot.get_chat(chat_id).await {
@@ -177,11 +192,9 @@ pub async fn pinned_command(
 
                 bot.send_message(
                     chat_id,
-                    format!(
-                        "📌 <b>Pesan yang disematkan:</b>\n\n{}\n\n<a href=\"{}\">Lihat pesan →</a>",
-                        crate::utils::html_escape(&preview_truncated),
-                        link
-                    )
+                    get_text(&locale, "pin.pinned_header")
+                        .replace("{preview}", &crate::utils::html_escape(&preview_truncated))
+                        .replace("{link}", &link)
                 )
                 .parse_mode(ParseMode::Html)
                 .link_preview_options(teloxide::types::LinkPreviewOptions {
@@ -194,7 +207,7 @@ pub async fn pinned_command(
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             } else {
-                bot.send_message(chat_id, "📌 Tidak ada pesan yang disematkan di grup ini.")
+                bot.send_message(chat_id, get_text(&locale, "pin.pinned_none"))
                     .reply_parameters(ReplyParameters::new(msg.id))
                     .await?;
             }
@@ -224,10 +237,16 @@ pub async fn unpin_command(
         return Ok(());
     }
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     if !state.permissions.can_pin_messages(chat_id, user_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Anda tidak memiliki izin untuk melepas sematan.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanPinMessages"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -236,12 +255,12 @@ pub async fn unpin_command(
     if let Some(mid) = message_id {
         match bot.unpin_chat_message(chat_id).message_id(mid).await {
             Ok(_) => {
-                bot.send_message(chat_id, "✅ Pesan dilepas dari sematan.")
+                bot.send_message(chat_id, get_text(&locale, "pin.unpinned"))
                     .reply_parameters(ReplyParameters::new(mid))
                     .await?;
             }
             Err(e) => {
-                bot.send_message(chat_id, format!("❌ Gagal melepas sematan: {}", e))
+                bot.send_message(chat_id, get_text(&locale, "pin.unpin_failed").replace("{error}", &e.to_string()))
                     .reply_parameters(ReplyParameters::new(msg.id))
                     .await?;
             }
@@ -250,12 +269,12 @@ pub async fn unpin_command(
         // If no reply, unpin the most recent pin
         match bot.unpin_chat_message(chat_id).await {
             Ok(_) => {
-                 bot.send_message(chat_id, "✅ Sematan terakhir dilepas.")
+                 bot.send_message(chat_id, get_text(&locale, "pin.unpinned_latest"))
                     .reply_parameters(ReplyParameters::new(msg.id))
                     .await?;
             }
              Err(e) => {
-                bot.send_message(chat_id, format!("❌ Gagal melepas sematan (pastikan ada pesan yang dipin): {}", e))
+                bot.send_message(chat_id, get_text(&locale, "pin.unpin_failed").replace("{error}", &e.to_string()))
                     .reply_parameters(ReplyParameters::new(msg.id))
                     .await?;
             }
@@ -278,21 +297,27 @@ pub async fn unpinall_command(
         return Ok(());
     }
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     if !state.permissions.can_pin_messages(chat_id, user_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Anda tidak memiliki izin untuk melepas sematan.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanPinMessages"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
     match bot.unpin_all_chat_messages(chat_id).await {
         Ok(_) => {
-            bot.send_message(chat_id, "✅ Semua pesan telah dilepas dari sematan.")
+            bot.send_message(chat_id, get_text(&locale, "pin.unpin_all_success"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         }
         Err(e) => {
-            bot.send_message(chat_id, format!("❌ Gagal melepas semua sematan: {}", e))
+            bot.send_message(chat_id, get_text(&locale, "pin.unpin_all_failed").replace("{error}", &e.to_string()))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         }

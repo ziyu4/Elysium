@@ -9,6 +9,7 @@ use tracing::info;
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
 use crate::database::FloodPenalty;
+use crate::i18n::get_text;
 
 /// Handle /antiflood command - show or toggle antiflood.
 pub async fn antiflood_command(
@@ -24,11 +25,15 @@ pub async fn antiflood_command(
 
     // Check if in group
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
-        bot.send_message(chat_id, "⚠️ Perintah ini hanya untuk grup.")
+        let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+        bot.send_message(chat_id, get_text(&locale, "antiflood.error_group_only"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
     }
+    
+    // Resolve locale
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
 
     // Check admin permission (can_change_info)
     if !state
@@ -37,7 +42,7 @@ pub async fn antiflood_command(
         .await
         .unwrap_or(false)
     {
-        bot.send_message(chat_id, "❌ Anda harus menjadi admin dengan izin 'Ubah Info Grup'.")
+        bot.send_message(chat_id, get_text(&locale, "antiflood.error_permission"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -52,20 +57,14 @@ pub async fn antiflood_command(
     if args.is_empty() {
         // Show current status
         let status = if ctx.antiflood.enabled {
-            format!(
-                "✅ <b>Antiflood Aktif</b>\n\n\
-                📊 Limit: <code>{}</code> pesan dalam <code>{}</code> detik\n\
-                ⚠️ Peringatan sebelum aksi: <code>{}</code>\n\
-                🔨 Hukuman: {}\n\
-                ⏱️ Durasi: {}",
-                ctx.antiflood.max_messages,
-                ctx.antiflood.time_window_secs,
-                ctx.antiflood.warnings_before_penalty,
-                penalty_to_string(&ctx.antiflood.penalty),
-                duration_to_string(ctx.antiflood.penalty_duration_secs)
-            )
+            get_text(&locale, "antiflood.status_enabled")
+                .replace("{limit}", &ctx.antiflood.max_messages.to_string())
+                .replace("{seconds}", &ctx.antiflood.time_window_secs.to_string())
+                .replace("{warns}", &ctx.antiflood.warnings_before_penalty.to_string())
+                .replace("{penalty}", &penalty_to_string(&ctx.antiflood.penalty, &locale))
+                .replace("{duration}", &duration_to_string(ctx.antiflood.penalty_duration_secs, &locale))
         } else {
-            "❌ <b>Antiflood Nonaktif</b>\n\nGunakan <code>/antiflood on</code> untuk mengaktifkan.".to_string()
+            get_text(&locale, "antiflood.status_disabled")
         };
 
         bot.send_message(chat_id, status)
@@ -79,7 +78,7 @@ pub async fn antiflood_command(
         "on" | "enable" => {
             ctx.antiflood.enabled = true;
             state.message_context.update_antiflood(chat_id.0, ctx.antiflood).await?;
-            bot.send_message(chat_id, "✅ Antiflood diaktifkan!")
+            bot.send_message(chat_id, get_text(&locale, "antiflood.enabled"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             info!("Antiflood enabled in chat {}", chat_id);
@@ -87,7 +86,7 @@ pub async fn antiflood_command(
         "off" | "disable" => {
             ctx.antiflood.enabled = false;
             state.message_context.update_antiflood(chat_id.0, ctx.antiflood).await?;
-            bot.send_message(chat_id, "❌ Antiflood dinonaktifkan!")
+            bot.send_message(chat_id, get_text(&locale, "antiflood.disabled"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             info!("Antiflood disabled in chat {}", chat_id);
@@ -95,12 +94,7 @@ pub async fn antiflood_command(
         _ => {
             bot.send_message(
                 chat_id,
-                "📖 <b>Penggunaan Antiflood</b>\n\n\
-                <code>/antiflood</code> - Lihat status\n\
-                <code>/antiflood on</code> - Aktifkan\n\
-                <code>/antiflood off</code> - Nonaktifkan\n\
-                <code>/setflood &lt;jumlah&gt; &lt;detik&gt;</code> - Atur limit\n\
-                <code>/setfloodpenalty &lt;warn/mute/kick/ban&gt;</code> - Atur hukuman"
+                get_text(&locale, "antiflood.usage")
             )
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
@@ -128,13 +122,15 @@ pub async fn setflood_command(
         return Ok(());
     }
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     if !state
         .permissions
         .can_change_info(chat_id, user_id)
         .await
         .unwrap_or(false)
     {
-        bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Ubah Info Grup'.")
+        bot.send_message(chat_id, get_text(&locale, "antiflood.error_permission"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -146,8 +142,7 @@ pub async fn setflood_command(
     if args.len() < 2 {
         bot.send_message(
             chat_id,
-            "📖 <b>Penggunaan:</b>\n<code>/setflood &lt;jumlah_pesan&gt; &lt;detik&gt;</code>\n\n\
-            Contoh: <code>/setflood 5 10</code> (5 pesan dalam 10 detik)",
+            get_text(&locale, "antiflood.setflood_usage"),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -158,7 +153,7 @@ pub async fn setflood_command(
     let max_messages: u32 = match args[0].parse() {
         Ok(n) if (2..=100).contains(&n) => n,
         _ => {
-            bot.send_message(chat_id, "❌ Jumlah pesan harus antara 2-100.")
+            bot.send_message(chat_id, get_text(&locale, "antiflood.error_limit_count"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             return Ok(());
@@ -168,7 +163,7 @@ pub async fn setflood_command(
     let time_window: u32 = match args[1].parse() {
         Ok(n) if (1..=300).contains(&n) => n,
         _ => {
-            bot.send_message(chat_id, "❌ Waktu harus antara 1-300 detik.")
+            bot.send_message(chat_id, get_text(&locale, "antiflood.error_limit_time"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             return Ok(());
@@ -182,10 +177,9 @@ pub async fn setflood_command(
 
     bot.send_message(
         chat_id,
-        format!(
-            "✅ Limit flood diatur: <b>{}</b> pesan dalam <b>{}</b> detik",
-            max_messages, time_window
-        ),
+        get_text(&locale, "antiflood.limit_set")
+            .replace("{count}", &max_messages.to_string())
+            .replace("{seconds}", &time_window.to_string()),
     )
     .parse_mode(ParseMode::Html)
     .reply_parameters(ReplyParameters::new(msg.id))
@@ -206,13 +200,16 @@ pub async fn setfloodpenalty_command(
         None => return Ok(()),
     };
 
+    // Resolve locale
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     if !state
         .permissions
         .can_change_info(chat_id, user_id)
         .await
         .unwrap_or(false)
     {
-        bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Ubah Info Grup'.")
+        bot.send_message(chat_id, get_text(&locale, "antiflood.error_permission"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -224,9 +221,7 @@ pub async fn setfloodpenalty_command(
     if args.is_empty() {
         bot.send_message(
             chat_id,
-            "📖 <b>Penggunaan:</b>\n<code>/setfloodpenalty &lt;tipe&gt; [durasi]</code>\n\n\
-            Tipe: <code>warn</code>, <code>mute</code>, <code>kick</code>, <code>tempban</code>, <code>ban</code>\n\
-            Durasi (untuk mute/tempban): dalam detik atau format 1h, 30m, dll",
+            get_text(&locale, "antiflood.setpenalty_usage"),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -241,7 +236,7 @@ pub async fn setfloodpenalty_command(
         "tempban" => FloodPenalty::TempBan,
         "ban" => FloodPenalty::Ban,
         _ => {
-            bot.send_message(chat_id, "❌ Tipe tidak valid. Gunakan: warn, mute, kick, tempban, ban")
+            bot.send_message(chat_id, get_text(&locale, "antiflood.error_penalty_type"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             return Ok(());
@@ -261,11 +256,9 @@ pub async fn setfloodpenalty_command(
 
     bot.send_message(
         chat_id,
-        format!(
-            "✅ Hukuman flood diatur: <b>{}</b> ({})",
-            penalty_to_string(&penalty),
-            duration_to_string(duration_secs)
-        ),
+        get_text(&locale, "antiflood.penalty_set")
+            .replace("{penalty}", &penalty_to_string(&penalty, &locale))
+            .replace("{duration}", &duration_to_string(duration_secs, &locale)),
     )
     .parse_mode(ParseMode::Html)
     .reply_parameters(ReplyParameters::new(msg.id))
@@ -292,27 +285,32 @@ fn parse_duration(s: &str) -> Option<u64> {
     s.parse().ok()
 }
 
-fn penalty_to_string(penalty: &FloodPenalty) -> &'static str {
-    match penalty {
-        FloodPenalty::Warn => "⚠️ Peringatan",
-        FloodPenalty::Mute => "🔇 Mute",
-        FloodPenalty::Kick => "👢 Kick",
-        FloodPenalty::TempBan => "⏳ Ban Sementara",
-        FloodPenalty::Ban => "🔨 Ban Permanen",
-    }
+fn penalty_to_string(penalty: &FloodPenalty, locale: &str) -> String {
+    let key = match penalty {
+        FloodPenalty::Warn => "antiflood.penalty_warn",
+        FloodPenalty::Mute => "antiflood.penalty_mute",
+        FloodPenalty::Kick => "antiflood.penalty_kick",
+        FloodPenalty::TempBan => "antiflood.penalty_tempban",
+        FloodPenalty::Ban => "antiflood.penalty_ban",
+    };
+    get_text(locale, key)
 }
 
-fn duration_to_string(secs: u64) -> String {
+fn duration_to_string(secs: u64, locale: &str) -> String {
     if secs == 0 {
-        return "Permanen".to_string();
+        return get_text(locale, "antiflood.duration_permanent");
     }
     if secs < 60 {
-        format!("{} detik", secs)
+        get_text(locale, "antiflood.duration_seconds")
+            .replace("{seconds}", &secs.to_string())
     } else if secs < 3600 {
-        format!("{} menit", secs / 60)
+        get_text(locale, "antiflood.duration_minutes")
+            .replace("{minutes}", &(secs / 60).to_string())
     } else if secs < 86400 {
-        format!("{} jam", secs / 3600)
+        get_text(locale, "antiflood.duration_hours")
+            .replace("{hours}", &(secs / 3600).to_string())
     } else {
-        format!("{} hari", secs / 86400)
+        get_text(locale, "antiflood.duration_days")
+            .replace("{days}", &(secs / 86400).to_string())
     }
 }

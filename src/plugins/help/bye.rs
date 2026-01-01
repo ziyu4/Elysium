@@ -1,25 +1,14 @@
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 
-pub fn get_text() -> String {
-    "<b>👋 Bantuan: Goodbye</b>\n\n\
-    Fitur goodbye mengirim pesan otomatis saat member keluar dari grup.\n\n\
-    <b>Perintah:</b>\n\
-    • <code>/bye</code> - Lihat status & preview\n\
-    • <code>/bye on/off</code> - Aktifkan/nonaktifkan\n\
-    • <code>/setbye</code> - Atur pesan (reply ke pesan)\n\
-    • <code>/setbyebuttons</code> - Atur tombol\n\
-    • <code>/resetbye</code> - Reset ke default\n\n\
-    <b>Format Tombol:</b>\n\
-    Sama dengan welcome. Gunakan <code>{button:Teks|URL}</code>\n\n\
-    <b>Placeholder:</b>\n\
-    • <code>{first}</code>, <code>{last}</code>, <code>{fullname}</code>\n\
-    • <code>{mention}</code>, <code>{id}</code>\n\
-    • <code>{group}</code>, <code>{count}</code>"
-    .to_string()
+pub fn get_text(locale: &str) -> String {
+    crate::i18n::get_text(locale, "help.bye_text")
 }
 
-pub fn get_keyboard() -> InlineKeyboardMarkup {
+pub fn get_keyboard(locale: &str) -> InlineKeyboardMarkup {
+    let back_text = crate::i18n::get_text(locale, "help.back");
+    let back_text = if back_text == "help.back" { "🔙 Back".to_string() } else { format!("🔙 {}", back_text) };
+
     InlineKeyboardMarkup::new(vec![
-        vec![InlineKeyboardButton::callback("🔙 Kembali", "help:back")],
+        vec![InlineKeyboardButton::callback(back_text, "help:back")],
     ])
 }

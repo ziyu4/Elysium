@@ -8,6 +8,7 @@ use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, Rep
 use tracing::info;
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
+use crate::i18n::get_text;
 
 /// Handle /rules command - show group rules.
 pub async fn rules_command(
@@ -18,18 +19,21 @@ pub async fn rules_command(
     let chat_id = msg.chat.id;
 
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
-        bot.send_message(chat_id, "⚠️ Perintah ini hanya untuk grup.")
+        let locale = state.get_locale(Some(chat_id.0), Some(msg.from.as_ref().map(|u| u.id.0).unwrap_or(0))).await;
+        bot.send_message(chat_id, get_text(&locale, "rules.error_group_only"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
     }
+
+    let locale = state.get_locale(Some(chat_id.0), Some(msg.from.as_ref().map(|u| u.id.0).unwrap_or(0))).await;
 
     let settings = state.rules.get_or_create(chat_id.0).await?;
 
     let rules_text = match &settings.text {
         Some(text) if !text.trim().is_empty() => text,
         _ => {
-            bot.send_message(chat_id, "📜 Belum ada peraturan yang ditetapkan untuk grup ini.")
+            bot.send_message(chat_id, get_text(&locale, "rules.none_setup"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             return Ok(());
@@ -48,18 +52,16 @@ pub async fn rules_command(
             deep_link.parse().unwrap(),
         )]]);
 
-        bot.send_message(chat_id, "📜 Klik tombol di bawah untuk membaca peraturan grup.")
+        bot.send_message(chat_id, get_text(&locale, "rules.pm_click_text"))
             .reply_markup(keyboard)
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
     } else {
         // Show rules directly in group
         let title = msg.chat.title().unwrap_or("Grup");
-        let formatted = format!(
-            "<b>📜 Peraturan {}</b>\n\n{}",
-            html_escape(title),
-            rules_text
-        );
+        let formatted = get_text(&locale, "rules.title_format")
+            .replace("{title}", &html_escape(title))
+            .replace("{text}", rules_text);
 
         bot.send_message(chat_id, formatted)
             .parse_mode(ParseMode::Html)
@@ -83,11 +85,14 @@ pub async fn setrules_command(
     };
 
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
-        bot.send_message(chat_id, "⚠️ Perintah ini hanya untuk grup.")
+        let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+        bot.send_message(chat_id, get_text(&locale, "rules.error_group_only"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
     }
+
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
 
     if !state
         .permissions
@@ -95,9 +100,13 @@ pub async fn setrules_command(
         .await
         .unwrap_or(false)
     {
-        bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Ubah Info Grup'.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanChangeInfo"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -107,10 +116,7 @@ pub async fn setrules_command(
     if rules_text.is_none() {
         bot.send_message(
             chat_id,
-            "<b>📖 Cara mengatur peraturan:</b>\n\n\
-            1. Reply ke pesan dengan <code>/setrules</code>\n\
-            2. Atau: <code>/setrules Peraturan grup ini adalah...</code>\n\n\
-            Teks mendukung format HTML dan multi-baris.",
+            get_text(&locale, "rules.set_usage"),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -123,7 +129,7 @@ pub async fn setrules_command(
     // Use RulesRepository specific method
     state.rules.set_rules(chat_id.0, Some(rules_text)).await?;
 
-    bot.send_message(chat_id, "✅ Peraturan grup berhasil diatur!\nGunakan /rules untuk melihat.")
+    bot.send_message(chat_id, get_text(&locale, "rules.set_success"))
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
 
@@ -143,22 +149,28 @@ pub async fn clearrules_command(
         None => return Ok(()),
     };
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     if !state
         .permissions
         .can_change_info(chat_id, user_id)
         .await
         .unwrap_or(false)
     {
-        bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Ubah Info Grup'.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanChangeInfo"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
     // Use RulesRepository specific method
     state.rules.clear_rules(chat_id.0).await?;
 
-    bot.send_message(chat_id, "✅ Peraturan grup telah dihapus.")
+    bot.send_message(chat_id, get_text(&locale, "rules.cleared"))
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
 
@@ -177,15 +189,21 @@ pub async fn setrulesprivate_command(
         None => return Ok(()),
     };
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     if !state
         .permissions
         .can_change_info(chat_id, user_id)
         .await
         .unwrap_or(false)
     {
-        bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Ubah Info Grup'.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanChangeInfo"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -204,9 +222,7 @@ pub async fn setrulesprivate_command(
             _ => {
                 bot.send_message(
                     chat_id,
-                    "📖 Gunakan: /setrulesprivate on/off\n\
-                    on = Tampilkan di PM\n\
-                    off = Tampilkan di grup",
+                    get_text(&locale, "rules.private_usage"),
                 )
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
@@ -218,12 +234,12 @@ pub async fn setrulesprivate_command(
     state.rules.save(&settings).await?;
 
     let mode = if settings.show_in_pm {
-        "di PM (pesan pribadi)"
+        get_text(&locale, "rules.private_mode")
     } else {
-        "langsung di grup"
+        get_text(&locale, "rules.group_mode")
     };
 
-    bot.send_message(chat_id, format!("✅ Peraturan akan ditampilkan {}.", mode))
+    bot.send_message(chat_id, get_text(&locale, "rules.private_set").replace("{mode}", &mode))
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
 
@@ -243,16 +259,19 @@ pub async fn handle_rules_deeplink(
     let group_chat_id: i64 = match chat_id_str.parse() {
         Ok(id) => id,
         Err(_) => {
-            bot.send_message(private_chat_id, "❌ Link tidak valid.")
+            let locale = state.get_locale(Some(private_chat_id.0), Some(msg.from.as_ref().map(|u| u.id.0).unwrap_or(0))).await;
+            bot.send_message(private_chat_id, get_text(&locale, "rules.error_link"))
                 .await?;
             return Ok(());
         }
     };
 
+    let locale = state.get_locale(Some(private_chat_id.0), Some(msg.from.as_ref().map(|u| u.id.0).unwrap_or(0))).await;
+
     let settings = match state.rules.get(group_chat_id).await? {
         Some(s) => s,
         None => {
-            bot.send_message(private_chat_id, "❌ Grup tidak ditemukan atau belum ada peraturan.")
+            bot.send_message(private_chat_id, get_text(&locale, "rules.error_group_not_found"))
                 .await?;
             return Ok(());
         }
@@ -261,7 +280,7 @@ pub async fn handle_rules_deeplink(
     let rules_text = match &settings.text {
         Some(text) if !text.trim().is_empty() => text,
         _ => {
-            bot.send_message(private_chat_id, "📜 Belum ada peraturan untuk grup ini.")
+            bot.send_message(private_chat_id, get_text(&locale, "rules.deeplink_none"))
                 .await?;
             return Ok(());
         }
@@ -273,11 +292,9 @@ pub async fn handle_rules_deeplink(
         Err(_) => "Grup".to_string(),
     };
 
-    let formatted = format!(
-        "<b>📜 Peraturan {}</b>\n\n{}",
-        html_escape(&group_name),
-        rules_text
-    );
+    let formatted = get_text(&locale, "rules.title_format")
+        .replace("{title}", &html_escape(&group_name))
+        .replace("{text}", rules_text);
 
     bot.send_message(private_chat_id, formatted)
         .parse_mode(ParseMode::Html)

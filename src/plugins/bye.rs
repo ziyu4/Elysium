@@ -11,6 +11,7 @@ use tracing::info;
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
 use crate::database::{ByeSettings, InlineButton};
+use crate::i18n::get_text;
 
 /// Handle /bye command - show or toggle goodbye.
 pub async fn bye_command(
@@ -25,11 +26,14 @@ pub async fn bye_command(
     };
 
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
-        bot.send_message(chat_id, "⚠️ Perintah ini hanya untuk grup.")
+        let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+        bot.send_message(chat_id, get_text(&locale, "bye.error_group_only"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
     }
+
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
 
     if !state
         .permissions
@@ -37,9 +41,13 @@ pub async fn bye_command(
         .await
         .unwrap_or(false)
     {
-        bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Ubah Info Grup'.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanChangeInfo"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -50,7 +58,7 @@ pub async fn bye_command(
 
     if args.is_empty() {
         // Show current bye settings
-        let status = format_bye_status(&settings);
+        let status = format_bye_status(&settings, &locale);
         bot.send_message(chat_id, status)
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
@@ -63,7 +71,7 @@ pub async fn bye_command(
             let mut new_settings = settings.clone();
             new_settings.enabled = true;
             state.bye.save(&new_settings).await?;
-            bot.send_message(chat_id, "✅ Goodbye message diaktifkan!")
+            bot.send_message(chat_id, get_text(&locale, "bye.enabled"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         }
@@ -71,7 +79,7 @@ pub async fn bye_command(
             let mut new_settings = settings.clone();
             new_settings.enabled = false;
             state.bye.save(&new_settings).await?;
-            bot.send_message(chat_id, "❌ Goodbye message dinonaktifkan!")
+            bot.send_message(chat_id, get_text(&locale, "bye.disabled"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         }
@@ -82,14 +90,7 @@ pub async fn bye_command(
         _ => {
             bot.send_message(
                 chat_id,
-                "<b>📖 Penggunaan Goodbye</b>\n\n\
-                <code>/bye</code> - Lihat status\n\
-                <code>/bye on</code> - Aktifkan\n\
-                <code>/bye off</code> - Nonaktifkan\n\
-                <code>/bye preview</code> - Preview pesan\n\
-                <code>/setbye</code> - Atur pesan (reply ke pesan/media)\n\
-                <code>/setbyebuttons</code> - Atur tombol\n\
-                <code>/resetbye</code> - Reset ke default",
+                get_text(&locale, "bye.usage"),
             )
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
@@ -112,15 +113,21 @@ pub async fn setbye_command(
         None => return Ok(()),
     };
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     if !state
         .permissions
         .can_change_info(chat_id, user_id)
         .await
         .unwrap_or(false)
     {
-        bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Ubah Info Grup'.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanChangeInfo"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -148,7 +155,7 @@ pub async fn setbye_command(
         }
 
         state.bye.save(&settings).await?;
-        bot.send_message(chat_id, "✅ Goodbye message berhasil diatur!")
+        bot.send_message(chat_id, get_text(&locale, "bye.set_success"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         info!("Goodbye message set in chat {}", chat_id);
@@ -158,21 +165,13 @@ pub async fn setbye_command(
         settings.media_file_id = None;
         settings.media_type = None;
         state.bye.save(&settings).await?;
-        bot.send_message(chat_id, "✅ Goodbye message berhasil diatur!")
+        bot.send_message(chat_id, get_text(&locale, "bye.set_success"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
     } else {
         bot.send_message(
             chat_id,
-            "<b>📖 Cara mengatur goodbye:</b>\n\n\
-            1. Reply ke pesan/media dengan <code>/setbye</code>\n\
-            2. Atau: <code>/setbye Selamat tinggal!</code>\n\n\
-            <b>Format yang didukung:</b>\n\
-            <code>{name}</code> - Nama user\n\
-            <code>{username}</code> - Username\n\
-            <code>{mention}</code> - Mention user\n\
-            <code>{id}</code> - User ID\n\
-            <code>{group}</code> - Nama grup",
+            get_text(&locale, "bye.set_usage"),
         )
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
@@ -194,15 +193,21 @@ pub async fn setbyebuttons_command(
         None => return Ok(()),
     };
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     if !state
         .permissions
         .can_change_info(chat_id, user_id)
         .await
         .unwrap_or(false)
     {
-        bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Ubah Info Grup'.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanChangeInfo"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
@@ -219,17 +224,13 @@ pub async fn setbyebuttons_command(
         state.bye.save(&settings).await?;
 
         if args == "clear" {
-            bot.send_message(chat_id, "✅ Tombol goodbye dihapus!")
+            bot.send_message(chat_id, get_text(&locale, "bye.buttons_cleared"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
         } else {
             bot.send_message(
                 chat_id,
-                "<b>📖 Cara mengatur tombol:</b>\n\n\
-                <code>/setbyebuttons {button:Teks|url}</code>\n\n\
-                Gunakan <code>:same</code> untuk tombol di baris sama:\n\
-                <code>{button:Teks1|url1}:same {button:Teks2|url2}</code>\n\n\
-                <code>/setbyebuttons clear</code> - Hapus semua tombol",
+                get_text(&locale, "bye.buttons_usage"),
             )
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
@@ -242,7 +243,7 @@ pub async fn setbyebuttons_command(
     let buttons = parse_buttons(args);
 
     if buttons.is_empty() {
-        bot.send_message(chat_id, "❌ Format tombol tidak valid. Gunakan: {button:Teks|url}")
+        bot.send_message(chat_id, get_text(&locale, "bye.error_buttons_format"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -251,7 +252,7 @@ pub async fn setbyebuttons_command(
     settings.buttons = buttons;
     state.bye.save(&settings).await?;
 
-    bot.send_message(chat_id, "✅ Tombol goodbye berhasil diatur!")
+    bot.send_message(chat_id, get_text(&locale, "bye.buttons_set"))
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
 
@@ -270,23 +271,28 @@ pub async fn resetbye_command(
         None => return Ok(()),
     };
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     if !state
         .permissions
         .can_change_info(chat_id, user_id)
         .await
         .unwrap_or(false)
     {
-        bot.send_message(chat_id, "❌ Anda harus admin dengan izin 'Ubah Info Grup'.")
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
+        bot.send_message(
+            chat_id,
+            get_text(&locale, "common.error_missing_permission")
+                .replace("{permission}", "CanChangeInfo"),
+        )
+        .reply_parameters(ReplyParameters::new(msg.id))
+        .await?;
         return Ok(());
     }
 
-    let mut settings = state.bye.get_or_create(chat_id.0).await?;
-    settings = ByeSettings::new(chat_id.0); // Reset to default
+    let settings = ByeSettings::new(chat_id.0); // Reset to default
     state.bye.save(&settings).await?;
 
-    bot.send_message(chat_id, "✅ Goodbye message direset ke default!")
+    bot.send_message(chat_id, get_text(&locale, "bye.reset_success"))
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
 
@@ -401,32 +407,39 @@ fn try_parse_button(chars: &[char], start: usize) -> Option<(InlineButton, usize
     Some((InlineButton { text, url }, i))
 }
 
-fn format_bye_status(settings: &ByeSettings) -> String {
-    let status = if settings.enabled { "✅ Aktif" } else { "❌ Nonaktif" };
+fn format_bye_status(settings: &ByeSettings, locale: &str) -> String {
+    let status = if settings.enabled {
+        get_text(locale, "bye.status_active")
+    } else {
+        get_text(locale, "bye.status_inactive")
+    };
+    
+    let default_msg = get_text(locale, "bye.status_none");
     let message = settings
         .message
         .as_deref()
-        .unwrap_or("<i>Tidak ada</i>");
+        .unwrap_or(&default_msg);
+        
     let media = if settings.media_file_id.is_some() {
-        format!("✅ {} terlampir", settings.media_type.as_deref().unwrap_or("Media"))
+        get_text(locale, "bye.status_media_attached")
+            .replace("{type}", settings.media_type.as_deref().unwrap_or("Media"))
     } else {
-        "❌ Tidak ada".to_string()
+        get_text(locale, "bye.status_no_media")
     };
+    
     let buttons = if settings.buttons.is_empty() {
-        "❌ Tidak ada".to_string()
+        get_text(locale, "bye.status_no_buttons")
     } else {
         let count: usize = settings.buttons.iter().map(|r| r.len()).sum();
-        format!("✅ {} tombol", count)
+        get_text(locale, "bye.status_buttons_count")
+            .replace("{count}", &count.to_string())
     };
 
-    format!(
-        "<b>👋 Pengaturan Goodbye</b>\n\n\
-        <b>Status:</b> {}\n\
-        <b>Media:</b> {}\n\
-        <b>Tombol:</b> {}\n\n\
-        <b>Pesan:</b>\n{}",
-        status, media, buttons, message
-    )
+    get_text(locale, "bye.status_header")
+        .replace("{status}", &status)
+        .replace("{media}", &media)
+        .replace("{buttons}", &buttons)
+        .replace("{message}", message)
 }
 
 async fn send_bye_preview(

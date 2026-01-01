@@ -56,6 +56,8 @@ impl UserRepo {
             // Preserve AFK status from existing cache/db
             cached_user.afk_reason = existing.afk_reason.clone();
             cached_user.afk_time = existing.afk_time;
+            // Preserve Lang if not explicitly set (which it isn't from telegram update)
+            cached_user.lang = existing.lang.clone();
 
             if !existing.has_changed(user) {
                 // If core data hasn't changed, we don't need to write to DB
@@ -76,8 +78,9 @@ impl UserRepo {
              // For robustness, usually we merge. But standard upsert is fine for now.
              // If they were AFK and we rebooted, loading from DB resolves this.
              if let Ok(Some(db_user)) = self.get_by_id_internal(user_id).await {
-                 cached_user.afk_reason = db_user.afk_reason;
+                 cached_user.afk_reason = db_user.afk_reason.clone();
                  cached_user.afk_time = db_user.afk_time;
+                 cached_user.lang = db_user.lang.clone();
              }
         }
 
@@ -200,5 +203,22 @@ impl UserRepo {
         }
 
         Ok(result)
+    }
+
+    /// Set user language.
+    pub async fn set_lang(&self, user_id: u64, lang: String) -> Result<()> {
+        let mut user = match self.get_by_id(user_id).await? {
+            Some(u) => u,
+            None => return Ok(()), // Should probably error or upsert, but for now ignore if unknown
+        };
+
+        user.lang = Some(lang.clone());
+        self.cache_by_id.insert(user_id, user);
+
+        let filter = doc! { "user_id": user_id as i64 };
+        let update = doc! { "$set": { "lang": lang } };
+        
+        self.collection.update_one(filter, update).await?;
+        Ok(())
     }
 }

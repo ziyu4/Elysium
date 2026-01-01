@@ -8,6 +8,7 @@ use teloxide::types::{ParseMode, ReplyParameters, InlineKeyboardMarkup, InlineKe
 use crate::bot::dispatcher::{AppState, ThrottledBot};
 use crate::database::models::DbNote;
 use crate::utils::{apply_fillings_new, html_escape, parser::parse_buttons};
+use crate::i18n::get_text;
 
 async fn save_note(
     bot: ThrottledBot,
@@ -15,8 +16,10 @@ async fn save_note(
     state: AppState,
     args: &[&str],
 ) -> anyhow::Result<()> {
+    let locale = state.get_locale(Some(msg.chat.id.0), Some(msg.from.as_ref().map(|u| u.id.0).unwrap_or(0))).await;
+
     if args.len() < 2 {
-        bot.send_message(msg.chat.id, "❌ Format: <code>/save nama konten</code>")
+        bot.send_message(msg.chat.id, get_text(&locale, "notes.save_usage"))
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
@@ -32,7 +35,7 @@ async fn save_note(
     let content = content_part.trim();
 
     if content.is_empty() {
-         bot.send_message(msg.chat.id, "❌ Konten tidak boleh kosong.")
+         bot.send_message(msg.chat.id, get_text(&locale, "notes.error_empty_content"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -63,7 +66,7 @@ async fn save_note(
 
     state.notes.save_note(&note).await?;
 
-    bot.send_message(msg.chat.id, format!("✅ Note <code>{}</code> berhasil disimpan!", html_escape(&name)))
+    bot.send_message(msg.chat.id, get_text(&locale, "notes.saved").replace("{name}", &html_escape(&name)))
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
@@ -79,8 +82,10 @@ async fn list_notes(
     // Uses L1 Cache (Keys Only)
     let names = state.notes.get_names(msg.chat.id.0).await?;
 
+    let locale = state.get_locale(Some(msg.chat.id.0), Some(msg.from.as_ref().map(|u| u.id.0).unwrap_or(0))).await;
+
     if names.is_empty() {
-        bot.send_message(msg.chat.id, "❌ Belum ada notes di grup ini.")
+        bot.send_message(msg.chat.id, get_text(&locale, "notes.list_empty"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -88,11 +93,13 @@ async fn list_notes(
 
     let notes_list = names
         .iter()
-        .map(|n| format!("• <code>#{}</code>", html_escape(n)))
+        .map(|n| format!("• <code>{}</code>", html_escape(n)))
         .collect::<Vec<_>>()
         .join("\n");
 
-    bot.send_message(msg.chat.id, format!("<b>📝 Daftar Notes:</b>\n\n{}", notes_list))
+    let notes_footer = get_text(&locale, "notes.list_footer");
+
+    bot.send_message(msg.chat.id, format!("{}\n\n{}\n\n{}", get_text(&locale, "notes.list_header"), notes_list, notes_footer))
         .parse_mode(ParseMode::Html)
         .reply_parameters(ReplyParameters::new(msg.id))
         .await?;
@@ -116,7 +123,8 @@ async fn get_note(
     if let Some(note) = state.notes.get_note(msg.chat.id.0, name_clean).await? {
         send_note_response(&bot, &msg, &note).await?;
     } else {
-        bot.send_message(msg.chat.id, format!("❌ Note <code>{}</code> tidak ditemukan.", html_escape(name_clean)))
+        let locale = state.get_locale(Some(msg.chat.id.0), Some(msg.from.as_ref().map(|u| u.id.0).unwrap_or(0))).await;
+        bot.send_message(msg.chat.id, get_text(&locale, "notes.not_found").replace("{name}", &html_escape(name_clean)))
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
@@ -135,13 +143,17 @@ async fn clear_note(
     }
     let name = args[0].to_lowercase();
     
+    // Resolve locale
+    let locale = state.get_locale(Some(msg.chat.id.0), Some(msg.from.as_ref().map(|u| u.id.0).unwrap_or(0))).await;
+
     if state.notes.delete_note(msg.chat.id.0, &name).await? {
-        bot.send_message(msg.chat.id, format!("✅ Note <code>{}</code> berhasil dihapus.", html_escape(&name)))
+        bot.send_message(msg.chat.id, get_text(&locale, "notes.deleted").replace("{name}", &html_escape(&name)))
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
     } else {
-        bot.send_message(msg.chat.id, "❌ Note tidak ditemukan.")
+        bot.send_message(msg.chat.id, get_text(&locale, "notes.not_found").replace("{name}", &html_escape(&name)))
+            .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
     }
@@ -260,23 +272,25 @@ pub async fn clear_command(bot: ThrottledBot, msg: Message, state: AppState) -> 
 }
 
 /// Clear all notes command (placeholder - requires admin check).
-pub async fn clearall_command(bot: ThrottledBot, msg: Message, _state: AppState) -> anyhow::Result<()> {
+pub async fn clearall_command(bot: ThrottledBot, msg: Message, state: AppState) -> anyhow::Result<()> {
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
         return Ok(());
     }
     // TODO: Implement clearall with admin permission check
-    bot.send_message(msg.chat.id, "❌ Fitur clearall belum diimplementasikan.")
+    let locale = state.get_locale(Some(msg.chat.id.0), Some(msg.from.as_ref().map(|u| u.id.0).unwrap_or(0))).await;
+    bot.send_message(msg.chat.id, get_text(&locale, "notes.error_clearall_impl"))
         .await?;
     Ok(())
 }
 
 /// Toggle private notes command (placeholder).
-pub async fn privatenotes_command(bot: ThrottledBot, msg: Message, _state: AppState) -> anyhow::Result<()> {
+pub async fn privatenotes_command(bot: ThrottledBot, msg: Message, state: AppState) -> anyhow::Result<()> {
     if !msg.chat.is_group() && !msg.chat.is_supergroup() {
         return Ok(());
     }
     // TODO: Implement private notes toggle
-    bot.send_message(msg.chat.id, "❌ Fitur privatenotes belum diimplementasikan.")
+    let locale = state.get_locale(Some(msg.chat.id.0), Some(msg.from.as_ref().map(|u| u.id.0).unwrap_or(0))).await;
+    bot.send_message(msg.chat.id, get_text(&locale, "notes.error_privatenotes_impl"))
         .await?;
     Ok(())
 }

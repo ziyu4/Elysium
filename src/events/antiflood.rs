@@ -14,6 +14,7 @@ use tracing::{debug, info, warn};
 use crate::bot::dispatcher::{AppState, ThrottledBot};
 use crate::database::FloodPenalty;
 use crate::utils::{html_escape, format_duration_full};
+use crate::i18n::get_text;
 
 /// User's flood tracking data
 #[derive(Debug, Clone)]
@@ -201,6 +202,9 @@ async fn antiflood_check_impl(
         return Ok(());
     }
 
+    // Resolve locale
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     let (is_flooding, warnings) = flood_tracker.record_message(
         chat_id.0,
         user_id.0,
@@ -221,13 +225,12 @@ async fn antiflood_check_impl(
     if warnings <= ctx.antiflood.warnings_before_penalty {
         // Send warning
         let remaining = ctx.antiflood.warnings_before_penalty - warnings + 1;
-        let warning_msg = format!(
-            "❌ Ya, saya tidak suka banjir pesan yang kamu lakukan!\n\n\
-            <a href=\"tg://user?id={}\">{}</a>, harap jaga ritme pesanmu. ({} peringatan tersisa)",
-            user_id,
-            html_escape(&user.first_name),
-            remaining
-        );
+        
+        let warning_msg = get_text(&locale, "antiflood.flood_warning")
+            .replace("{id}", &user_id.to_string())
+            .replace("{name}", &html_escape(&user.first_name))
+            .replace("{count}", &remaining.to_string());
+
         bot.send_message(chat_id, warning_msg)
             .parse_mode(ParseMode::Html)
             .await?;
@@ -243,13 +246,9 @@ async fn antiflood_check_impl(
         FloodPenalty::Warn => {
             bot.send_message(
                 chat_id,
-                format!(
-                    "❌ Ya, saya tidak suka banjir pesan yang kamu lakukan!\n\n\
-                    <a href=\"tg://user?id={}\">{}</a> telah melakukan flood!\n\
-                    Harap tidak mengulangi lagi.",
-                    user_id,
-                    html_escape(&user.first_name)
-                ),
+                get_text(&locale, "antiflood.penalty_warn_msg")
+                    .replace("{id}", &user_id.to_string())
+                    .replace("{name}", &html_escape(&user.first_name)),
             )
             .parse_mode(ParseMode::Html)
             .await?;
@@ -272,16 +271,17 @@ async fn antiflood_check_impl(
             {
                 Ok(_) => {
                     let duration_str = format!("selama {}", format_duration_full(ctx.antiflood.penalty_duration_secs));
+                    // Ideally format_duration_full should also be localized later, but sticking to English/Simple for now
+                    // or we can pass localized "selama 5 menit" if we had localized duration formatter.
+                    // For now, let's keep it simple as part of the message replacement or just inject it.
+                    // The i18n key expects `{duration}`.
+                    
                     bot.send_message(
                         chat_id,
-                        format!(
-                            "❌ Ya, saya tidak suka banjir pesan yang kamu lakukan!\n\n\
-                            <a href=\"tg://user?id={}\">{}</a> telah di-mute {}.\n\
-                            Harap tidak mengulangi lagi.",
-                            user_id,
-                            html_escape(&user.first_name),
-                            duration_str
-                        ),
+                        get_text(&locale, "antiflood.penalty_mute_msg")
+                            .replace("{id}", &user_id.to_string())
+                            .replace("{name}", &html_escape(&user.first_name))
+                            .replace("{duration}", &duration_str),
                     )
                     .parse_mode(ParseMode::Html)
                     .await?;
@@ -298,13 +298,9 @@ async fn antiflood_check_impl(
                     let _ = bot.unban_chat_member(chat_id, user_id).await;
                     bot.send_message(
                         chat_id,
-                        format!(
-                            "❌ Ya, saya tidak suka banjir pesan yang kamu lakukan!\n\n\
-                            <a href=\"tg://user?id={}\">{}</a> telah dikeluarkan.\n\
-                            Jika mau kembali, harap tidak mengulangi lagi.",
-                            user_id,
-                            html_escape(&user.first_name)
-                        ),
+                        get_text(&locale, "antiflood.penalty_kick_msg")
+                            .replace("{id}", &user_id.to_string())
+                            .replace("{name}", &html_escape(&user.first_name)),
                     )
                     .parse_mode(ParseMode::Html)
                     .await?;
@@ -327,14 +323,10 @@ async fn antiflood_check_impl(
                     let duration_str = format!("selama {}", format_duration_full(ctx.antiflood.penalty_duration_secs));
                     bot.send_message(
                         chat_id,
-                        format!(
-                            "❌ Ya, saya tidak suka banjir pesan yang kamu lakukan!\n\n\
-                            <a href=\"tg://user?id={}\">{}</a> telah di-ban {}.\n\
-                            Sampai jumpa.",
-                            user_id,
-                            html_escape(&user.first_name),
-                            duration_str
-                        ),
+                        get_text(&locale, "antiflood.penalty_tban_msg")
+                            .replace("{id}", &user_id.to_string())
+                            .replace("{name}", &html_escape(&user.first_name))
+                            .replace("{duration}", &duration_str),
                     )
                     .parse_mode(ParseMode::Html)
                     .await?;
@@ -349,13 +341,9 @@ async fn antiflood_check_impl(
                 Ok(_) => {
                     bot.send_message(
                         chat_id,
-                        format!(
-                            "❌ Ya, saya tidak suka banjir pesan yang kamu lakukan!\n\n\
-                            <a href=\"tg://user?id={}\">{}</a> telah di-ban permanen.\n\
-                            Selamat tinggal.",
-                            user_id,
-                            html_escape(&user.first_name)
-                        ),
+                        get_text(&locale, "antiflood.penalty_ban_msg")
+                            .replace("{id}", &user_id.to_string())
+                            .replace("{name}", &html_escape(&user.first_name)),
                     )
                     .parse_mode(ParseMode::Html)
                     .await?;

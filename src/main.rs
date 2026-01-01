@@ -21,6 +21,7 @@ mod events;
 mod permissions;
 mod plugins;
 mod utils;
+pub mod i18n;
 
 use std::sync::Arc;
 
@@ -59,6 +60,11 @@ async fn main() -> anyhow::Result<()> {
     // Load configuration
     let config = Config::from_env();
     info!("Configuration loaded successfully");
+    
+    // Initialize I18n
+    i18n::init();
+    info!("I18n initialized");
+
     info!("Bot mode: {:?}", config.bot_mode);
 
     // Connect to MongoDB

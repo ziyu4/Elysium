@@ -11,27 +11,17 @@ use crate::bot::dispatcher::{AppState, ThrottledBot};
 pub async fn start_handler(
     bot: ThrottledBot,
     msg: Message,
-    _state: AppState,
+    state: AppState,
 ) -> anyhow::Result<()> {
     let chat_id = msg.chat.id;
+    let user_id = msg.from.as_ref().map(|u| u.id).unwrap_or(UserId(0));
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
 
-    let welcome_text = r#"*Halo\!* 👋
-
-Saya adalah *Elysium*, bot manajemen grup Telegram\.
-
-*Fitur:*
-• Antiflood
-• Welcome/Goodbye
-• AFK
-• Notes
-• Filters
-• Admin commands
-
-Gunakan /help untuk melihat daftar perintah\."#;
+    let welcome_text = crate::i18n::get_text(&locale, "start.welcome");
 
     let keyboard = InlineKeyboardMarkup::new(vec![
         vec![
-            InlineKeyboardButton::url("👨‍💻 Developer", "https://github.com/ziyu4".parse().unwrap()),
+            InlineKeyboardButton::url(crate::i18n::get_text(&locale, "start.btn_dev"), "https://github.com/ziyu4".parse().unwrap()),
         ],
     ]);
 

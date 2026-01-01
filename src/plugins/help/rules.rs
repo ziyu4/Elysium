@@ -1,23 +1,14 @@
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 
-pub fn get_text() -> String {
-    "<b>📜 Bantuan: Rules</b>\n\n\
-    Atur peraturan grup.\n\n\
-    <b>Perintah:</b>\n\
-    • <code>/rules</code> - Lihat peraturan grup\n\
-    • <code>/setrules</code> - Atur peraturan (reply ke pesan)\n\
-    • <code>/clearrules</code> - Hapus peraturan\n\
-    • <code>/setrulesprivate on/off</code> - Kirim rules ke PM\n\n\
-    <b>Format:</b>\n\
-    Mendukung tombol dan placeholder seperti welcome.\n\
-    Gunakan <code>{button:Teks|URL}</code> untuk tombol.\n\n\
-    <b>Integrasi:</b>\n\
-    Gunakan <code>{rules}</code> di welcome/notes untuk menyertakan rules."
-    .to_string()
+pub fn get_text(locale: &str) -> String {
+    crate::i18n::get_text(locale, "help.rules_text")
 }
 
-pub fn get_keyboard() -> InlineKeyboardMarkup {
+pub fn get_keyboard(locale: &str) -> InlineKeyboardMarkup {
+    let back_text = crate::i18n::get_text(locale, "help.back");
+    let back_text = if back_text == "help.back" { "🔙 Back".to_string() } else { format!("🔙 {}", back_text) };
+
     InlineKeyboardMarkup::new(vec![
-        vec![InlineKeyboardButton::callback("🔙 Kembali", "help:back")],
+        vec![InlineKeyboardButton::callback(back_text, "help:back")],
     ])
 }

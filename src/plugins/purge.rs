@@ -9,6 +9,7 @@ use teloxide::prelude::*;
 use teloxide::types::{MessageId, ReplyParameters, UserId};
 
 use crate::bot::dispatcher::{AppState, ThrottledBot};
+use crate::i18n::get_text;
 
 /// Global cache for purgefrom markers: chat_id -> message_id
 static PURGE_MARKERS: LazyLock<Mutex<HashMap<i64, MessageId>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -40,12 +41,18 @@ async fn purge_action(
         return Ok(());
     }
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     // Check permission: can_delete_messages
     if !state.permissions.can_delete_messages(chat_id, user_id).await.unwrap_or(false) {
         if !silent {
-            bot.send_message(chat_id, "❌ Anda tidak memiliki izin untuk menghapus pesan.")
-                .reply_parameters(ReplyParameters::new(msg.id))
-                .await?;
+            bot.send_message(
+                chat_id,
+                get_text(&locale, "common.error_missing_permission")
+                    .replace("{permission}", "CanDeleteMessages"),
+            )
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .await?;
         }
         return Ok(());
     }
@@ -55,7 +62,7 @@ async fn purge_action(
         Some(r) => r,
         None => {
             if !silent {
-                bot.send_message(chat_id, "❌ Reply ke pesan untuk memulai purge.")
+                bot.send_message(chat_id, get_text(&locale, "purge.error_reply_start"))
                     .reply_parameters(ReplyParameters::new(msg.id))
                     .await?;
             }
@@ -99,7 +106,7 @@ async fn purge_action(
     if !silent && deleted_count > 0 {
         let confirm = bot.send_message(
             chat_id, 
-            format!("✅ Berhasil menghapus {} pesan.", deleted_count)
+            get_text(&locale, "purge.purge_success").replace("{count}", &deleted_count.to_string())
         ).await?;
         
         // Auto-delete confirmation after 3 seconds
@@ -121,9 +128,11 @@ pub async fn del_command(bot: ThrottledBot, msg: Message, state: AppState) -> an
         return Ok(());
     }
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     // Check permission
     if !state.permissions.can_delete_messages(chat_id, user_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Anda tidak memiliki izin untuk menghapus pesan.")
+        bot.send_message(chat_id, get_text(&locale, "purge.error_permission"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -133,7 +142,7 @@ pub async fn del_command(bot: ThrottledBot, msg: Message, state: AppState) -> an
     let reply = match msg.reply_to_message() {
         Some(r) => r,
         None => {
-            bot.send_message(chat_id, "❌ Reply ke pesan yang ingin dihapus.")
+            bot.send_message(chat_id, get_text(&locale, "purge.error_reply_delete"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             return Ok(());
@@ -156,9 +165,11 @@ pub async fn purgefrom_command(bot: ThrottledBot, msg: Message, state: AppState)
         return Ok(());
     }
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     // Check permission
     if !state.permissions.can_delete_messages(chat_id, user_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Anda tidak memiliki izin untuk menghapus pesan.")
+        bot.send_message(chat_id, get_text(&locale, "purge.error_permission"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -168,7 +179,7 @@ pub async fn purgefrom_command(bot: ThrottledBot, msg: Message, state: AppState)
     let reply = match msg.reply_to_message() {
         Some(r) => r,
         None => {
-            bot.send_message(chat_id, "❌ Reply ke pesan untuk menandai titik awal purge.")
+            bot.send_message(chat_id, get_text(&locale, "purge.error_reply_start"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             return Ok(());
@@ -185,7 +196,7 @@ pub async fn purgefrom_command(bot: ThrottledBot, msg: Message, state: AppState)
 
     let confirm = bot.send_message(
         chat_id,
-        "📍 Titik awal purge ditandai. Gunakan /purgeto untuk menghapus range."
+        get_text(&locale, "purge.purgefrom_start")
     ).await?;
 
     // Auto-delete confirmation
@@ -206,9 +217,11 @@ pub async fn purgeto_command(bot: ThrottledBot, msg: Message, state: AppState) -
         return Ok(());
     }
 
+    let locale = state.get_locale(Some(chat_id.0), Some(user_id.0)).await;
+
     // Check permission
     if !state.permissions.can_delete_messages(chat_id, user_id).await.unwrap_or(false) {
-        bot.send_message(chat_id, "❌ Anda tidak memiliki izin untuk menghapus pesan.")
+        bot.send_message(chat_id, get_text(&locale, "purge.error_permission"))
             .reply_parameters(ReplyParameters::new(msg.id))
             .await?;
         return Ok(());
@@ -218,7 +231,7 @@ pub async fn purgeto_command(bot: ThrottledBot, msg: Message, state: AppState) -
     let reply = match msg.reply_to_message() {
         Some(r) => r,
         None => {
-            bot.send_message(chat_id, "❌ Reply ke pesan untuk menandai titik akhir purge.")
+            bot.send_message(chat_id, get_text(&locale, "purge.purgeto_no_reply"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             return Ok(());
@@ -236,13 +249,13 @@ pub async fn purgeto_command(bot: ThrottledBot, msg: Message, state: AppState) -
     let start_id = match start_id_result {
         Ok(Some(id)) => id,
         Ok(None) => {
-            bot.send_message(chat_id, "❌ Tidak ada titik awal. Gunakan /purgefrom dulu.")
+            bot.send_message(chat_id, get_text(&locale, "purge.purgeto_no_start"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             return Ok(());
         }
         Err(_) => {
-            bot.send_message(chat_id, "❌ Internal error.")
+            bot.send_message(chat_id, get_text(&locale, "purge.error_internal"))
                 .reply_parameters(ReplyParameters::new(msg.id))
                 .await?;
             return Ok(());
@@ -271,7 +284,7 @@ pub async fn purgeto_command(bot: ThrottledBot, msg: Message, state: AppState) -
     if deleted_count > 0 {
         let confirm = bot.send_message(
             chat_id,
-            format!("✅ Berhasil menghapus {} pesan.", deleted_count)
+            get_text(&locale, "purge.purge_success").replace("{count}", &deleted_count.to_string())
         ).await?;
 
         tokio::spawn(async move {
