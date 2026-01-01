@@ -35,7 +35,8 @@ async fn filter_check_impl(
         return Ok(());
     }
 
-    let text = match msg.text() {
+    // Get text from message text OR caption (for media messages)
+    let text = match msg.text().or_else(|| msg.caption()) {
         Some(t) => t,
         None => return Ok(()),
     };

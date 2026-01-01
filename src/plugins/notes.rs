@@ -18,7 +18,8 @@ async fn save_note(
 ) -> anyhow::Result<()> {
     let locale = state.get_locale(Some(msg.chat.id.0), Some(msg.from.as_ref().map(|u| u.id.0).unwrap_or(0))).await;
 
-    if args.len() < 2 {
+    // Must have at least the note name
+    if args.is_empty() {
         bot.send_message(msg.chat.id, get_text(&locale, "notes.save_usage"))
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id))
@@ -28,36 +29,61 @@ async fn save_note(
 
     let name = args[0].to_lowercase();
     
-    // Extract everything after the name as content, preserving newlines if raw text
-    // But since we split by whitespace, we need to rejoin or better, split once.
-    let full_text = msg.text().unwrap_or("");
-    let (_cmd_name_part, content_part) = full_text.split_once(&name).unwrap_or(("", ""));
-    let content = content_part.trim();
-
-    if content.is_empty() {
-         bot.send_message(msg.chat.id, get_text(&locale, "notes.error_empty_content"))
-            .reply_parameters(ReplyParameters::new(msg.id))
-            .await?;
-        return Ok(());
-    }
+    // Determine content and media from multiple sources:
+    // 1. Inline content after name: /save name content here
+    // 2. Reply message text/caption
+    // 3. Reply message media
     
-    // Parse buttons if any
-    let (clean_content, buttons) = parse_buttons(content);
-
-    // Check media
-    let (file_id, file_type) = if let Some(reply) = msg.reply_to_message() {
-        if let Some(photo) = reply.photo().and_then(|p| p.last()) {
+    let full_text = msg.text().unwrap_or("");
+    let inline_content = full_text
+        .split_once(&name)
+        .map(|(_, rest)| rest.trim())
+        .unwrap_or("");
+    
+    let reply = msg.reply_to_message();
+    
+    // Get content: prefer inline, then reply text/caption
+    let content = if !inline_content.is_empty() {
+        inline_content.to_string()
+    } else if let Some(reply_msg) = reply {
+        // Try text first, then caption
+        reply_msg.text()
+            .or_else(|| reply_msg.caption())
+            .map(String::from)
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    
+    // Get media from reply
+    let (file_id, file_type) = if let Some(reply_msg) = reply {
+        if let Some(photo) = reply_msg.photo().and_then(|p| p.last()) {
             (Some(photo.file.id.clone()), Some("photo".to_string()))
-        } else if let Some(video) = reply.video() {
-             (Some(video.file.id.clone()), Some("video".to_string()))
-        } else if let Some(doc) = reply.document() {
-             (Some(doc.file.id.clone()), Some("document".to_string()))
+        } else if let Some(video) = reply_msg.video() {
+            (Some(video.file.id.clone()), Some("video".to_string()))
+        } else if let Some(doc) = reply_msg.document() {
+            (Some(doc.file.id.clone()), Some("document".to_string()))
+        } else if let Some(anim) = reply_msg.animation() {
+            (Some(anim.file.id.clone()), Some("animation".to_string()))
+        } else if let Some(sticker) = reply_msg.sticker() {
+            (Some(sticker.file.id.clone()), Some("sticker".to_string()))
         } else {
             (None, None)
         }
     } else {
         (None, None)
     };
+    
+    // Must have either content or media
+    if content.is_empty() && file_id.is_none() {
+        bot.send_message(msg.chat.id, get_text(&locale, "notes.error_empty_content"))
+            .reply_parameters(ReplyParameters::new(msg.id))
+            .await?;
+        return Ok(());
+    }
+    
+    // Parse buttons if any
+    let (clean_content, buttons) = parse_buttons(&content);
     
     let mut note = DbNote::new(msg.chat.id.0, &name, &clean_content);
     note.buttons = buttons;
